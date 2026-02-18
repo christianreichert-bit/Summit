@@ -1,5 +1,5 @@
 # GYM TRACKER APP
-Kevin Sully, Omor Ogiepa, Christian Reichert
+Kevin Sully, Omor Ogieva, Christian Reichert
 
 This App is a Gym tracker app that will be a React Native mobile app that can be used by anyone to track their workouts as easily as possible. It will use a database backend to store all of a persons data to which someone can look back and make their own conclusions.
 

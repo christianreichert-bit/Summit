@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { Session } from "@supabase/supabase-js";
-import { supabase } from "./supabaseClient";
+import { supabase } from "../lib/supabaseClient";
 
 export default function RootLayout() {
   const [session, setSession] = useState<Session | null>(null);
@@ -24,7 +24,6 @@ export default function RootLayout() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Navigate based on auth state
   useEffect(() => {
     if (loading) return;
 
@@ -43,6 +42,7 @@ export default function RootLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="auth" />
+      <Stack.Screen name="test" />
     </Stack>
   );
 }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import { supabase } from "../lib/supabaseClient";
+import { db, isOnline } from "./backend/db";
 
 export default function Auth() {
   const [email, setEmail] = useState("");
@@ -16,35 +16,12 @@ export default function Auth() {
     setError(null);
     setMessage(null);
 
-    // 1) Create auth user
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-
-    if (signUpError) {
-      setError(signUpError.message);
-      setLoading(false);
-      return;
+    const { error } = await db.signUp(email, password, username);
+    if (error) {
+      setError(error.message);
+    } else {
+      setMessage("Sign up successful!");
     }
-
-    // 2) Insert into your users table
-    if (data.user) {
-      const { error: insertError } = await supabase.from("users").insert({
-        user_id: data.user.id,
-        username,
-        email,
-        password_hash: "managed_by_supabase_auth",
-      });
-
-      if (insertError) {
-        setError(insertError.message);
-        setLoading(false);
-        return;
-      }
-    }
-
-    setMessage("Sign up successful! Check your email for confirmation.");
     setLoading(false);
   };
 
@@ -53,13 +30,9 @@ export default function Auth() {
     setError(null);
     setMessage(null);
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (signInError) {
-      setError(signInError.message);
+    const { error } = await db.signIn(email, password);
+    if (error) {
+      setError(error.message);
     } else {
       setMessage("Signed in!");
     }
@@ -69,6 +42,7 @@ export default function Auth() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{isSignUp ? "Sign Up" : "Sign In"}</Text>
+      {!isOnline && <Text style={styles.offlineText}>⚡ Offline Mode</Text>}
 
       {isSignUp && (
         <TextInput
@@ -120,18 +94,9 @@ export default function Auth() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 16,
-    paddingTop: 100,
-    gap: 12,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "700",
-    textAlign: "center",
-    marginBottom: 12,
-  },
+  container: { flex: 1, padding: 16, paddingTop: 100, gap: 12 },
+  title: { fontSize: 24, fontWeight: "700", textAlign: "center", marginBottom: 12 },
+  offlineText: { textAlign: "center", color: "#f59e0b", fontWeight: "600" },
   input: {
     borderWidth: 1,
     borderColor: "#ccc",
@@ -145,20 +110,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: "center",
   },
-  buttonText: {
-    color: "#fff",
-    fontWeight: "600",
-    fontSize: 16,
-  },
-  switchText: {
-    color: "#3b82f6",
-    textAlign: "center",
-    marginTop: 8,
-  },
-  errorText: {
-    color: "red",
-  },
-  successText: {
-    color: "green",
-  },
+  buttonText: { color: "#fff", fontWeight: "600", fontSize: 16 },
+  switchText: { color: "#3b82f6", textAlign: "center", marginTop: 8 },
+  errorText: { color: "red" },
+  successText: { color: "green" },
 });

@@ -1,22 +1,21 @@
 import { useEffect, useState } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
-import { Session } from "@supabase/supabase-js";
-import { supabase } from "../lib/supabaseClient";
+import { db, isOnline } from "./backend/db";
 
 export default function RootLayout() {
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const segments = useSegments();
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    db.getSession().then(({ data: { session } }: any) => {
       setSession(session);
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
+    const { data: { subscription } } = db.onAuthStateChange(
+      (_event: string, session: any) => {
         setSession(session);
       }
     );

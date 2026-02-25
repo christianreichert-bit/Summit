@@ -23,13 +23,24 @@ type RoutineExercise = {
   exercise_order: number;
 };
 
+type RoutineExerciseSet = {
+  routine_set_id: number;
+  routine_exercise_id: number;
+  set_number: number;
+  target_weight: number | null;
+  target_reps: number | null;
+  is_warmup: boolean;
+};
+
 let localUsers: User[] = [];
 let localRoutines: Routine[] = [];
 let localRoutineExercises: RoutineExercise[] = [];
+let localRoutineExerciseSets: RoutineExerciseSet[] = [];
 let localSession: { user: { id: string; email: string } } | null = null;
 
 let nextRoutineId = 1;
 let nextRoutineExerciseId = 1;
+let nextRoutineSetId = 1;
 
 export const localDb = {
   // Auth
@@ -100,8 +111,15 @@ export const localDb = {
   },
 
   deleteRoutine: async (routineId: number) => {
-    localRoutines = localRoutines.filter((r) => r.routine_id !== routineId);
+    // Delete sets for exercises in this routine
+    const exerciseIds = localRoutineExercises
+      .filter((re) => re.routine_id === routineId)
+      .map((re) => re.routine_exercise_id);
+    localRoutineExerciseSets = localRoutineExerciseSets.filter(
+      (s) => !exerciseIds.includes(s.routine_exercise_id)
+    );
     localRoutineExercises = localRoutineExercises.filter((re) => re.routine_id !== routineId);
+    localRoutines = localRoutines.filter((r) => r.routine_id !== routineId);
     return { error: null };
   },
 
@@ -128,8 +146,52 @@ export const localDb = {
   },
 
   deleteRoutineExercise: async (routineExerciseId: number) => {
+    // Also delete associated sets
+    localRoutineExerciseSets = localRoutineExerciseSets.filter(
+      (s) => s.routine_exercise_id !== routineExerciseId
+    );
     localRoutineExercises = localRoutineExercises.filter(
       (re) => re.routine_exercise_id !== routineExerciseId
+    );
+    return { error: null };
+  },
+
+  // Routine Exercise Sets (template sets)
+  getRoutineExerciseSets: async (routineExerciseId: number) => {
+    const data = localRoutineExerciseSets
+      .filter((s) => s.routine_exercise_id === routineExerciseId)
+      .sort((a, b) => a.set_number - b.set_number);
+    return { data, error: null };
+  },
+
+  insertRoutineExerciseSet: async (set: {
+    routine_exercise_id: number;
+    set_number: number;
+    target_weight: number | null;
+    target_reps: number | null;
+    is_warmup: boolean;
+  }) => {
+    const newSet: RoutineExerciseSet = {
+      routine_set_id: nextRoutineSetId++,
+      ...set,
+    };
+    localRoutineExerciseSets.push(newSet);
+    return { error: null };
+  },
+
+  deleteRoutineExerciseSet: async (routineSetId: number) => {
+    localRoutineExerciseSets = localRoutineExerciseSets.filter(
+      (s) => s.routine_set_id !== routineSetId
+    );
+    return { error: null };
+  },
+
+  updateRoutineExerciseSet: async (
+    routineSetId: number,
+    updates: { target_reps?: number | null; target_weight?: number | null; is_warmup?: boolean }
+  ) => {
+    localRoutineExerciseSets = localRoutineExerciseSets.map((s) =>
+      s.routine_set_id === routineSetId ? { ...s, ...updates } : s
     );
     return { error: null };
   },

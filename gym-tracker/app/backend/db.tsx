@@ -123,4 +123,49 @@ export const db = {
     }
     return localDb.deleteRoutineExercise(routineExerciseId);
   },
+
+  // Routine Exercise Sets (template sets)
+  getRoutineExerciseSets: async (routineExerciseId: number) => {
+    if (isOnline) {
+      return supabase
+        .from("routine_exercise_sets")
+        .select("*")
+        .eq("routine_exercise_id", routineExerciseId)
+        .order("set_number", { ascending: true });
+    }
+    return localDb.getRoutineExerciseSets(routineExerciseId);
+  },
+
+  insertRoutineExerciseSet: async (set: {
+    routine_exercise_id: number;
+    set_number: number;
+    target_weight: number | null;
+    target_reps: number | null;
+    is_warmup: boolean;
+  }) => {
+    if (isOnline) {
+      return supabase.from("routine_exercise_sets").insert(set);
+    }
+    return localDb.insertRoutineExerciseSet(set);
+  },
+
+  deleteRoutineExerciseSet: async (routineSetId: number) => {
+    if (isOnline) {
+      return supabase.from("routine_exercise_sets").delete().eq("routine_set_id", routineSetId);
+    }
+    return localDb.deleteRoutineExerciseSet(routineSetId);
+  },
+
+  updateRoutineExerciseSet: async (
+    routineSetId: number,
+    updates: { target_reps?: number | null; target_weight?: number | null; is_warmup?: boolean }
+  ) => {
+    if (isOnline) {
+      return supabase
+        .from("routine_exercise_sets")
+        .update(updates)
+        .eq("routine_set_id", routineSetId);
+    }
+    return localDb.updateRoutineExerciseSet(routineSetId, updates);
+  },
 };

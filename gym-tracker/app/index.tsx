@@ -9,19 +9,19 @@ import {
   TouchableOpacity,
   ScrollView,
   Platform,
-  Modal,
   TextInput,
-  FlatList,
-  KeyboardAvoidingView,
   SafeAreaView,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Routine, Exercise, WorkoutLog } from '../types';  // If types in root
 import exercisesData from '../../assets/data/exercises.json';  // If assets in root
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../lib/supabaseClient';
 
 const STORAGE_KEY = '@workout_logs';
+const SESSION_KEY = '@currentSessionId';
 
 // Get today's date formatted
 const getTodaysDate = () => {
@@ -112,12 +112,6 @@ const SetRow = ({ set, onUpdateSet, onToggleComplete }) => {
         />
       </View>
       <View style={styles.setInputCell}>
-        // Add this where you want the button (e.g., in the header or as a FAB)
-<Pressable 
-  style={styles.routinesButton}
-  onPress={() => router.push('/routines')}>
-  <Text style={styles.routinesButtonText}>My Routines</Text>
-</Pressable>
         <TextInput
           style={[styles.setInput, set.completed && styles.inputCompleted]}
           value={weight}
@@ -261,136 +255,244 @@ const ExerciseCard = ({ exercise, onRemove, onUpdateSet, onToggleSet }) => {
   );
 };
 
-// Routine Selection Modal
-const RoutineSelectModal = ({ visible, onClose, onSelectRoutine, routines }) => {
+export default function TodayScreen() {
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [routines, setRoutines] = useState<Routine[]>([]);
   const [selectedRoutine, setSelectedRoutine] = useState<Routine | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [sessionData, setSessionData] = useState<any>(null);
 
-  const handleSelect = () => {
-    if (selectedRoutine) {
-      onSelectRoutine(selectedRoutine);
-      setSelectedRoutine(null);
-      onClose();
+  // Load session status and user ID on mount
+  useEffect(() => {
+    initializeScreen();
+  }, []);
+
+  const initializeScreen = async () => {
+    setLoading(true);
+    try {
+      // Get user ID from AsyncStorage
+      const storedUserId = await AsyncStorage.getItem('userId');
+      setUserId(storedUserId);
+
+      // Check if there's an active session
+      const sessionId = await AsyncStorage.getItem(SESSION_KEY);
+      
+      if (sessionId) {
+        // Load active session data
+        await loadSession(sessionId);
+        setCurrentSessionId(sessionId);
+      } else {
+        // No active session, load routines for selection
+        await loadRoutines(storedUserId);
+      }
+    } catch (error) {
+      console.error('Failed to initialize screen:', error);
+      Alert.alert('Error', 'Failed to load data');
+    } finally {
+      setLoading(false);
     }
   };
 
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Add Routine</Text>
-            <TouchableOpacity onPress={onClose}>
-              <Text style={styles.closeButton}>✕</Text>
-            </TouchableOpacity>
-          </View>
-
-          <FlatList
-            data={routines}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[
-                  styles.routineListItem,
-                  selectedRoutine?.id === item.id && styles.routineListItemSelected,
-                ]}
-                onPress={() => setSelectedRoutine(item)}>
-                <View style={styles.routineListItemContent}>
-                  <Text style={styles.routineListItemName}>{item.name}</Text>
-                  <Text style={styles.routineListItemDay}>
-                    {item.day === 'Custom' ? item.customDayName : item.day} • {item.exercises.length} exercises
-                  </Text>
-                </View>
-                {selectedRoutine?.id === item.id && (
-                  <Text style={styles.checkmark}>✓</Text>
-                )}
-              </TouchableOpacity>
-            )}
-          />
-
-          <TouchableOpacity
-            style={[styles.addButton, !selectedRoutine && styles.addButtonDisabled]}
-            onPress={handleSelect}
-            disabled={!selectedRoutine}>
-            <Text style={styles.addButtonText}>Add to Today</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-};
-
-export default function TodayScreen() {
-  const [exercises, setExercises] = useState<Exercise[]>(initialExercises);
-  const [showRoutineModal, setShowRoutineModal] = useState(false);
-  const [routines, setRoutines] = useState<Routine[]>([]);
-  const [workoutLogs, setWorkoutLogs] = useState<WorkoutLog[]>([]);
-
-  // Load routines and logs on mount
-  useEffect(() => {
-    loadRoutines();
-    loadTodaysWorkout();
-  }, []);
-
-  const loadRoutines = async () => {
+  const loadRoutines = async (uid: string | null) => {
     try {
       const saved = await AsyncStorage.getItem('@routines');
       if (saved) {
-        setRoutines(JSON.parse(saved));
-      }
-    } catch (error) {
-      console.error('Failed to load routines');
-    }
-  };
-
-  const loadTodaysWorkout = async () => {
-    try {
-      const today = new Date().toDateString();
-      const logs = await AsyncStorage.getItem(STORAGE_KEY);
-      if (logs) {
-        const parsed = JSON.parse(logs);
-        const todaysLog = parsed.find(log => 
-          new Date(log.date).toDateString() === today
-        );
-        if (todaysLog && todaysLog.exercises.length > 0) {
-          setExercises(todaysLog.exercises);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load today\'s workout');
-    }
-  };
-
-  const saveWorkout = async () => {
-    try {
-      const existing = await AsyncStorage.getItem(STORAGE_KEY);
-      const logs = existing ? JSON.parse(existing) : [];
-      
-      const today = new Date();
-      const existingIndex = logs.findIndex(log => 
-        new Date(log.date).toDateString() === today.toDateString()
-      );
-
-      const workoutLog: WorkoutLog = {
-        id: existingIndex >= 0 ? logs[existingIndex].id : Date.now().toString(),
-        routineName: 'Custom Workout',
-        date: today,
-        exercises: exercises,
-      };
-
-      if (existingIndex >= 0) {
-        logs[existingIndex] = workoutLog;
+        const parsedRoutines = JSON.parse(saved);
+        setRoutines(parsedRoutines);
       } else {
-        logs.push(workoutLog);
+        setRoutines([]);
+      }
+    } catch (error) {
+      console.error('Failed to load routines:', error);
+      Alert.alert('Error', 'Failed to load routines');
+    }
+  };
+
+  const loadSession = async (sessionId: string) => {
+    try {
+      // Fetch session data with exercises and sets
+      const { data: session, error: sessionError } = await supabase
+        .from('workout_sessions')
+        .select('*')
+        .eq('session_id', sessionId)
+        .single();
+
+      if (sessionError) throw sessionError;
+
+      const { data: sessionExercises, error: exercisesError } = await supabase
+        .from('session_exercises')
+        .select(`
+          *,
+          session_exercise_sets (*)
+        `)
+        .eq('session_id', sessionId)
+        .order('exercise_order');
+
+      if (exercisesError) throw exercisesError;
+
+      setSessionData(session);
+
+      // Transform to Exercise format
+      const transformedExercises: Exercise[] = sessionExercises.map(ex => ({
+        id: ex.session_exercise_id,
+        name: ex.exercise_name,
+        muscleGroup: 'General', // You may want to fetch this
+        setCount: ex.session_exercise_sets?.length.toString() || '3',
+        sets: ex.session_exercise_sets?.map((set: any) => ({
+          setNumber: set.set_number,
+          reps: set.reps?.toString() || '',
+          weight: set.weight?.toString() || '',
+          completed: set.completed || false,
+        })) || [],
+      }));
+
+      setExercises(transformedExercises);
+    } catch (error) {
+      console.error('Failed to load session:', error);
+      Alert.alert('Error', 'Failed to load session');
+      // Clear invalid session
+      await AsyncStorage.removeItem(SESSION_KEY);
+      setCurrentSessionId(null);
+      await loadRoutines(userId);
+    }
+  };
+
+  const handleStartSession = async () => {
+    if (!selectedRoutine) {
+      Alert.alert('Error', 'Please select a routine');
+      return;
+    }
+    
+    if (!userId) {
+      Alert.alert('Not Logged In', 'Please log in first to start a workout session');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      console.log('Starting session for routine:', selectedRoutine.name);
+      console.log('User ID:', userId);
+      
+      const now = new Date();
+      const sessionDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+      const startTime = now.toISOString().split('T')[1].split('.')[0]; // HH:MM:SS
+      
+      console.log('Session date:', sessionDate);
+      console.log('Start time:', startTime);
+      
+      // Create workout session (routine_id is nullable since routines are in AsyncStorage)
+      const { data: session, error: sessionError } = await supabase
+        .from('workout_sessions')
+        .insert({
+          user_id: userId,
+          routine_id: null, // Routine is in AsyncStorage, not in DB
+          session_name: selectedRoutine.name,
+          session_date: sessionDate,
+          start_time: startTime,
+        })
+        .select()
+        .single();
+
+      if (sessionError) {
+        console.error('Session error:', sessionError);
+        throw sessionError;
+      }
+      
+      console.log('Session created:', session);
+
+      // Create session exercises
+      const sessionExercises = selectedRoutine.exercises.map((ex, index) => ({
+        session_id: session.session_id,
+        exercise_id: ex.exerciseId || ex.name, // Use exerciseId or name as fallback
+        exercise_name: ex.name,
+        exercise_order: index + 1,
+      }));
+
+      console.log('Creating exercises:', sessionExercises);
+
+      const { data: createdExercises, error: exercisesError } = await supabase
+        .from('session_exercises')
+        .insert(sessionExercises)
+        .select();
+
+      if (exercisesError) {
+        console.error('Exercises error:', exercisesError);
+        throw exercisesError;
       }
 
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
-      Alert.alert('Success', 'Workout saved!');
+      console.log('Exercises created:', createdExercises);
+
+      // Create default sets for each exercise
+      const allSets = createdExercises.flatMap((ex, index) => {
+        const routineEx = selectedRoutine.exercises[index];
+        const setCount = routineEx?.defaultSetCount || 3;
+        return Array.from({ length: setCount }, (_, i) => ({
+          session_exercise_id: ex.session_exercise_id,
+          set_number: i + 1,
+          weight: null,
+          reps: null,
+          is_warmup: false,
+          completed: false,
+        }));
+      });
+
+      console.log('Creating sets:', allSets);
+
+      const { error: setsError } = await supabase
+        .from('session_exercise_sets')
+        .insert(allSets);
+
+      if (setsError) {
+        console.error('Sets error:', setsError);
+        throw setsError;
+      }
+
+      console.log('Sets created successfully');
+
+      // Save session ID to AsyncStorage
+      await AsyncStorage.setItem(SESSION_KEY, session.session_id);
+      setCurrentSessionId(session.session_id);
+      
+      console.log('Loading session...');
+      // Load the session
+      await loadSession(session.session_id);
+      console.log('Session loaded successfully');
+    } catch (error: any) {
+      console.error('Failed to start session:', error);
+      Alert.alert('Error', error.message || 'Failed to start workout session');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEndSession = async () => {
+    if (!currentSessionId) return;
+    
+    try {
+      const endTime = new Date().toISOString().split('T')[1].split('.')[0]; // HH:MM:SS
+      
+      // Update session end time
+      await supabase
+        .from('workout_sessions')
+        .update({ end_time: endTime })
+        .eq('session_id', currentSessionId);
+
+      // Clear session from AsyncStorage
+      await AsyncStorage.removeItem(SESSION_KEY);
+      
+      // Reset all state to show routine selection
+      setCurrentSessionId(null);
+      setExercises([]);
+      setSelectedRoutine(null);
+      setSessionData(null);
+      
+      // Reload routines for selection
+      await loadRoutines(userId);
     } catch (error) {
-      Alert.alert('Error', 'Failed to save workout');
+      console.error('Failed to end session:', error);
+      Alert.alert('Error', 'Failed to end session');
     }
   };
 
@@ -398,7 +500,8 @@ export default function TodayScreen() {
     setExercises(exercises.filter((ex) => ex.id !== exerciseId));
   };
 
-  const handleUpdateSet = (exerciseId: string, setNumber: number, field: string, value: any) => {
+  const handleUpdateSet = async (exerciseId: string, setNumber: number, field: string, value: any) => {
+    // Update local state
     setExercises(
       exercises.map((exercise) => {
         if (exercise.id === exerciseId) {
@@ -412,44 +515,197 @@ export default function TodayScreen() {
         return exercise;
       })
     );
+
+    // Update in database
+    try {
+      const exercise = exercises.find(ex => ex.id === exerciseId);
+      if (!exercise) return;
+
+      const set = exercise.sets.find(s => s.setNumber === setNumber);
+      if (!set) return;
+
+      // Get the session_set_id from database
+      const { data: setData, error } = await supabase
+        .from('session_exercise_sets')
+        .select('session_set_id')
+        .eq('session_exercise_id', exerciseId)
+        .eq('set_number', setNumber)
+        .single();
+
+      if (error || !setData) {
+        console.error('Failed to find set:', error);
+        return;
+      }
+
+      await supabase
+        .from('session_exercise_sets')
+        .update({ [field]: value })
+        .eq('session_set_id', setData.session_set_id);
+    } catch (error) {
+      console.error('Failed to update set:', error);
+    }
   };
 
-  const handleToggleSet = (exerciseId: string, setNumber: number) => {
+  const handleToggleSet = async (exerciseId: string, setNumber: number) => {
+    const exercise = exercises.find(ex => ex.id === exerciseId);
+    if (!exercise) return;
+
+    const set = exercise.sets.find(s => s.setNumber === setNumber);
+    if (!set) return;
+
+    const newCompleted = !set.completed;
+
+    // Update local state
     setExercises(
       exercises.map((exercise) => {
         if (exercise.id === exerciseId) {
           return {
             ...exercise,
-            sets: exercise.sets.map((set) =>
-              set.setNumber === setNumber
-                ? { ...set, completed: !set.completed }
-                : set
+            sets: exercise.sets.map((s) =>
+              s.setNumber === setNumber
+                ? { ...s, completed: newCompleted }
+                : s
             ),
           };
         }
         return exercise;
       })
     );
+
+    // Update completed status in database
+    try {
+      const { data: setData, error } = await supabase
+        .from('session_exercise_sets')
+        .select('session_set_id')
+        .eq('session_exercise_id', exerciseId)
+        .eq('set_number', setNumber)
+        .single();
+
+      if (error || !setData) {
+        console.error('Failed to find set:', error);
+        return;
+      }
+
+      await supabase
+        .from('session_exercise_sets')
+        .update({
+          completed: newCompleted,
+          reps: newCompleted ? (parseInt(set.reps) || null) : null,
+          weight: newCompleted ? (parseFloat(set.weight) || null) : null,
+        })
+        .eq('session_set_id', setData.session_set_id);
+    } catch (error) {
+      console.error('Failed to save set:', error);
+    }
   };
 
-  const handleAddRoutine = (routine: Routine) => {
-    const newExercises: Exercise[] = routine.exercises.map((re, index) => ({
-      id: Date.now().toString() + index,
-      name: re.name,
-      muscleGroup: re.muscleGroup,
-      setCount: re.defaultSetCount.toString(),
-      sets: Array.from({ length: re.defaultSetCount }, (_, i) => ({
-        setNumber: i + 1,
-        reps: '10',
-        weight: '',
-        completed: false,
-      })),
-    }));
-    
-    setExercises([...exercises, ...newExercises]);
-    setShowRoutineModal(false);
+  const handleSignOut = async () => {
+    try {
+      // Clear user data from AsyncStorage
+      await AsyncStorage.removeItem('userId');
+      await AsyncStorage.removeItem(SESSION_KEY);
+      
+      // Sign out from Supabase
+      await supabase.auth.signOut();
+      
+      // Reset state
+      setUserId(null);
+      setCurrentSessionId(null);
+      setExercises([]);
+      setRoutines([]);
+      setSelectedRoutine(null);
+      
+      Alert.alert('Signed Out', 'You have been signed out successfully');
+    } catch (error) {
+      console.error('Failed to sign out:', error);
+      Alert.alert('Error', 'Failed to sign out');
+    }
   };
 
+  // Show loading screen
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#FF6B00" />
+          <Text style={styles.loadingText}>Loading...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Show routine selection screen if no active session
+  if (!currentSessionId) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <LinearGradient
+          colors={['#FF6B00', '#FF8C40']}
+          style={styles.header}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}>
+          <View style={styles.headerRow}>
+            <View>
+              <Text style={styles.selectionTitle}>Start a Workout</Text>
+              <Text style={styles.selectionSubtitle}>Select a routine to begin</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.signOutButton}
+              onPress={handleSignOut}>
+              <Text style={styles.signOutButtonText}>Sign Out</Text>
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+
+        <ScrollView style={styles.routineSelectionContainer}>
+          {routines.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateText}>No routines found</Text>
+              <Text style={styles.emptyStateSubtext}>
+                Create a routine first in the Routines tab
+              </Text>
+            </View>
+          ) : (
+            routines.map((routine) => (
+              <TouchableOpacity
+                key={routine.id}
+                style={[
+                  styles.routineCard,
+                  selectedRoutine?.id === routine.id && styles.routineCardSelected,
+                ]}
+                onPress={() => setSelectedRoutine(routine)}>
+                <View style={styles.routineCardContent}>
+                  <Text style={styles.routineCardName}>{routine.name}</Text>
+                  <Text style={styles.routineCardInfo}>
+                    {routine.exercises.length} exercises
+                  </Text>
+                  {selectedRoutine?.id === routine.id && (
+                    <Text style={styles.selectedCheckmark}>✓ Selected</Text>
+                  )}
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
+        </ScrollView>
+
+        {selectedRoutine && (
+          <View style={styles.startButtonContainer}>
+            <TouchableOpacity
+              style={styles.startButton}
+              onPress={handleStartSession}
+              disabled={loading}>
+              {loading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.startButtonText}>Start Workout</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+      </SafeAreaView>
+    );
+  }
+
+  // Show active workout session
   const completedSets = exercises.reduce(
     (acc, ex) => acc + ex.sets.filter((s) => s.completed).length,
     0
@@ -491,19 +747,12 @@ export default function TodayScreen() {
         {/* Exercises List */}
         <View style={styles.exercisesContainer}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Today's Workout</Text>
-            <View style={styles.headerButtons}>
-              <TouchableOpacity
-                style={styles.iconButton}
-                onPress={saveWorkout}>
-                <Text style={styles.iconButtonText}>💾</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.iconButton}
-                onPress={() => setShowRoutineModal(true)}>
-                <Text style={styles.iconButtonText}>📋</Text>
-              </TouchableOpacity>
-            </View>
+            <Text style={styles.sectionTitle}>{sessionData?.session_name || 'Workout'}</Text>
+            <TouchableOpacity
+              style={styles.endSessionButton}
+              onPress={handleEndSession}>
+              <Text style={styles.endSessionButtonText}>End Workout</Text>
+            </TouchableOpacity>
           </View>
 
           {exercises.map((exercise) => (
@@ -520,21 +769,11 @@ export default function TodayScreen() {
 
           {exercises.length === 0 && (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyStateText}>No exercises yet</Text>
-              <Text style={styles.emptyStateSubtext}>
-                Tap the 📋 button to add a routine
-              </Text>
+              <Text style={styles.emptyStateText}>No exercises in this routine</Text>
             </View>
           )}
         </View>
       </ScrollView>
-
-      <RoutineSelectModal
-        visible={showRoutineModal}
-        onClose={() => setShowRoutineModal(false)}
-        onSelectRoutine={handleAddRoutine}
-        routines={routines}
-      />
     </SafeAreaView>
   );
 }
@@ -859,6 +1098,108 @@ const styles = StyleSheet.create({
   addButtonText: {
     color: '#FFFFFF',
     fontSize: 18,
+    fontWeight: '600',
+  },
+  // Loading Screen
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000000',
+  },
+  loadingText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    marginTop: 16,
+  },
+  // Routine Selection Screen
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  selectionTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 8,
+  },
+  selectionSubtitle: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    opacity: 0.8,
+  },
+  signOutButton: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  signOutButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  routineSelectionContainer: {
+    flex: 1,
+    padding: 16,
+  },
+  routineCard: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#333',
+  },
+  routineCardSelected: {
+    borderColor: '#FF6B00',
+    backgroundColor: 'rgba(255,107,0,0.1)',
+  },
+  routineCardContent: {
+    gap: 8,
+  },
+  routineCardName: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  routineCardInfo: {
+    fontSize: 14,
+    color: '#888',
+  },
+  selectedCheckmark: {
+    fontSize: 14,
+    color: '#FF6B00',
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  startButtonContainer: {
+    padding: 16,
+    backgroundColor: '#000000',
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+  },
+  startButton: {
+    backgroundColor: '#FF6B00',
+    padding: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  startButtonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  endSessionButton: {
+    backgroundColor: '#FF3B30',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  endSessionButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
     fontWeight: '600',
   },
 });

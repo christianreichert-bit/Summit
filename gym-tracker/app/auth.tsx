@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../lib/supabaseClient";
 
 export default function Auth() {
@@ -53,7 +54,7 @@ export default function Auth() {
     setError(null);
     setMessage(null);
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -61,6 +62,10 @@ export default function Auth() {
     if (signInError) {
       setError(signInError.message);
     } else {
+      // Store user id in AsyncStorage
+      if (data.user) {
+        await AsyncStorage.setItem("userId", data.user.id);
+      }
       setMessage("Signed in!");
     }
     setLoading(false);

@@ -1,7 +1,6 @@
-// app/(tabs)/index.tsx
+// app/index.tsx
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'expo-router';
-import { Pressable } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import {
   StyleSheet,
   View,
@@ -17,8 +16,8 @@ import {
   Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Routine, Exercise, WorkoutLog } from '../types';  // If types in root
-import exercisesData from '../../assets/data/exercises.json';  // If assets in root
+import { Routine, Exercise, WorkoutLograck } from './types';
+import exercisesData from '../assets/data/exercises.json';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = '@workout_logs';
@@ -112,12 +111,6 @@ const SetRow = ({ set, onUpdateSet, onToggleComplete }) => {
         />
       </View>
       <View style={styles.setInputCell}>
-        // Add this where you want the button (e.g., in the header or as a FAB)
-<Pressable 
-  style={styles.routinesButton}
-  onPress={() => router.push('/routines')}>
-  <Text style={styles.routinesButtonText}>My Routines</Text>
-</Pressable>
         <TextInput
           style={[styles.setInput, set.completed && styles.inputCompleted]}
           value={weight}
@@ -171,7 +164,14 @@ const ExerciseCard = ({ exercise, onRemove, onUpdateSet, onToggleSet }) => {
       newSets = currentSets;
     }
 
-    // Update each set
+    // Create updated exercise with new sets
+    const updatedExercise = {
+      ...exercise,
+      setCount: newCount.toString(),
+      sets: newSets,
+    };
+    
+    // Call onUpdateSet for each set to update parent state
     newSets.forEach((set, index) => {
       onUpdateSet(set.setNumber, 'setNumber', index + 1);
     });
@@ -324,16 +324,29 @@ const RoutineSelectModal = ({ visible, onClose, onSelectRoutine, routines }) => 
 };
 
 export default function TodayScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams();
   const [exercises, setExercises] = useState<Exercise[]>(initialExercises);
   const [showRoutineModal, setShowRoutineModal] = useState(false);
   const [routines, setRoutines] = useState<Routine[]>([]);
-  const [workoutLogs, setWorkoutLogs] = useState<WorkoutLog[]>([]);
 
-  // Load routines and logs on mount
+  // Load routines and check for routine from params
   useEffect(() => {
     loadRoutines();
     loadTodaysWorkout();
   }, []);
+
+  // Check if a routine was passed from the routines screen
+  useEffect(() => {
+    if (params.selectedRoutine) {
+      try {
+        const routine = JSON.parse(params.selectedRoutine as string);
+        addRoutineToToday(routine);
+      } catch (error) {
+        console.error('Failed to parse routine', error);
+      }
+    }
+  }, [params.selectedRoutine]);
 
   const loadRoutines = async () => {
     try {
@@ -374,7 +387,7 @@ export default function TodayScreen() {
         new Date(log.date).toDateString() === today.toDateString()
       );
 
-      const workoutLog: WorkoutLog = {
+      const workoutLog = {
         id: existingIndex >= 0 ? logs[existingIndex].id : Date.now().toString(),
         routineName: 'Custom Workout',
         date: today,
@@ -432,9 +445,9 @@ export default function TodayScreen() {
     );
   };
 
-  const handleAddRoutine = (routine: Routine) => {
+  const addRoutineToToday = (routine: Routine) => {
     const newExercises: Exercise[] = routine.exercises.map((re, index) => ({
-      id: Date.now().toString() + index,
+      id: Date.now().toString() + index + Math.random(),
       name: re.name,
       muscleGroup: re.muscleGroup,
       setCount: re.defaultSetCount.toString(),
@@ -447,6 +460,11 @@ export default function TodayScreen() {
     }));
     
     setExercises([...exercises, ...newExercises]);
+    Alert.alert('Success', `Added "${routine.name}" to today's workout!`);
+  };
+
+  const handleAddRoutine = (routine: Routine) => {
+    addRoutineToToday(routine);
     setShowRoutineModal(false);
   };
 

@@ -1,164 +1,89 @@
-import { useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+// app/_layout.tsx
+import { useEffect, useState } from "react";
+import { Stack, useRouter, useSegments } from "expo-router";
+import { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabaseClient";
+import { Pressable, Text, ActivityIndicator, View } from "react-native";
 
-export default function Auth() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [username, setUsername] = useState("");
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+export default function RootLayout() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const segments = useSegments();
 
-  const handleSignUp = async () => {
-    setLoading(true);
-    setError(null);
-    setMessage(null);
-
-    // 1) Create auth user
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-
-    if (signUpError) {
-      setError(signUpError.message);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
       setLoading(false);
-      return;
-    }
-
-    // 2) Insert into your users table
-    if (data.user) {
-      const { error: insertError } = await supabase.from("users").insert({
-        user_id: data.user.id,
-        username,
-        email,
-        password_hash: "managed_by_supabase_auth",
-      });
-
-      if (insertError) {
-        setError(insertError.message);
-        setLoading(false);
-        return;
-      }
-    }
-
-    setMessage("Sign up successful! Check your email for confirmation.");
-    setLoading(false);
-  };
-
-  const handleSignIn = async () => {
-    setLoading(true);
-    setError(null);
-    setMessage(null);
-
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
     });
 
-    if (signInError) {
-      setError(signInError.message);
-    } else {
-      setMessage("Signed in!");
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session);
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+
+    const inAuthGroup = segments[0] === "auth";
+
+    if (!session && !inAuthGroup) {
+      // User is not signed in and not on auth screen -> redirect to auth
+      router.replace("/auth");
+    } else if (session && inAuthGroup) {
+      // User is signed in and on auth screen -> redirect to home
+      router.replace("/");
     }
-    setLoading(false);
-  };
+  }, [session, loading, segments]);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#FF6B00" />
+      </View>
+    );
+  }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>{isSignUp ? "Sign Up" : "Sign In"}</Text>
-
-      {isSignUp && (
-        <TextInput
-          style={styles.input}
-          placeholder="Username"
-          value={username}
-          onChangeText={setUsername}
-          autoCapitalize="none"
-        />
-      )}
-
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        value={email}
-        onChangeText={setEmail}
-        keyboardType="email-address"
-        autoCapitalize="none"
+    <Stack
+      screenOptions={{
+        headerStyle: {
+          backgroundColor: '#FF6B00',
+        },
+        headerTintColor: '#fff',
+        headerTitleStyle: {
+          fontWeight: 'bold',
+        },
+      }}
+    >
+      <Stack.Screen 
+        name="index" 
+        options={{ 
+          title: "Today's Workout",
+          headerRight: () => (
+            <Pressable onPress={() => router.push("/routines")}>
+              <Text style={{ color: '#fff', marginRight: 16, fontSize: 16 }}>Routines</Text>
+            </Pressable>
+          ),
+        }} 
       />
-
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
+      <Stack.Screen 
+        name="routines" 
+        options={{ 
+          title: "My Routines",
+          headerLeft: () => (
+            <Pressable onPress={() => router.back()}>
+              <Text style={{ color: '#fff', marginLeft: 16, fontSize: 16 }}>Back</Text>
+            </Pressable>
+          ),
+        }} 
       />
-
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      {message ? <Text style={styles.successText}>{message}</Text> : null}
-
-      <Pressable
-        style={styles.button}
-        onPress={isSignUp ? handleSignUp : handleSignIn}
-        disabled={loading}
-      >
-        <Text style={styles.buttonText}>
-          {loading ? "Loading..." : isSignUp ? "Sign Up" : "Sign In"}
-        </Text>
-      </Pressable>
-
-      <Pressable onPress={() => setIsSignUp(!isSignUp)}>
-        <Text style={styles.switchText}>
-          {isSignUp ? "Already have an account? Sign In" : "No account? Sign Up"}
-        </Text>
-      </Pressable>
-    </View>
+      <Stack.Screen name="auth" options={{ headerShown: false }} />
+      <Stack.Screen name="test" options={{ title: "Supabase Test" }} />
+    </Stack>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 16,
-    paddingTop: 100,
-    gap: 12,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "700",
-    textAlign: "center",
-    marginBottom: 12,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-  },
-  button: {
-    backgroundColor: "#3b82f6",
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: "center",
-  },
-  buttonText: {
-    color: "#fff",
-    fontWeight: "600",
-    fontSize: 16,
-  },
-  switchText: {
-    color: "#3b82f6",
-    textAlign: "center",
-    marginTop: 8,
-  },
-  errorText: {
-    color: "red",
-  },
-  successText: {
-    color: "green",
-  },
-});

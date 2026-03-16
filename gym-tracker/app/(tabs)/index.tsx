@@ -15,10 +15,10 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Routine, Exercise, WorkoutLog } from '../types';  // If types in root
+import { Routine, Exercise, WorkoutLog } from '../../types';  // If types in root
 import exercisesData from '../../assets/data/exercises.json';  // If assets in root
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase } from './backend/supabaseClient';
+import { supabase } from '../backend/supabaseClient';
 
 const STORAGE_KEY = '@workout_logs';
 const SESSION_KEY = '@currentSessionId';

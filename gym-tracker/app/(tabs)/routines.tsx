@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Routine, RoutineExercise } from './types';
-import exercisesData from '../assets/data/exercises.json';
+import exercisesData from '../../assets/data/exercises.json';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 

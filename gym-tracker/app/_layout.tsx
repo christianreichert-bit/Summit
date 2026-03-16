@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { Session } from "@supabase/supabase-js";
-import { supabase } from "../lib/supabaseClient";
+import { supabase } from "./backend/supabaseClient";
 import { Pressable, Text } from "react-native";
 
 export default function RootLayout() {

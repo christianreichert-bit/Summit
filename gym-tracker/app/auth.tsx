@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { supabase } from "../lib/supabaseClient";
+import { supabase } from "./backend/supabaseClient";
 
 export default function Auth() {
   const [email, setEmail] = useState("");

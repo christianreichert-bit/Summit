@@ -1,4 +1,4 @@
-// app/(tabs)/routines.tsx
+// app/routines.tsx
 import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
@@ -14,17 +14,15 @@ import {
   Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-// Update these paths
-import { Routine, RoutineExercise } from 'y../types';
+import { Routine, RoutineExercise } from './types';
 import exercisesData from '../assets/data/exercises.json';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { Pressable } from 'react-native';
 
 const STORAGE_KEY = '@routines';
 
 // Routine Card Component
-const RoutineCard = ({ routine, onEdit, onDelete, onUse }) => {
+const RoutineCard = ({ routine, onDelete, onUse }) => {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -279,6 +277,7 @@ const CreateRoutineModal = ({ visible, onClose, onSave }) => {
 };
 
 export default function RoutinesScreen() {
+  const router = useRouter();
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
@@ -331,8 +330,13 @@ export default function RoutinesScreen() {
   };
 
   const handleUseRoutine = (routine: Routine) => {
-    // This will be handled by the tab navigator to pass to Today screen
-    Alert.alert('Success', 'Routine added to today\'s workout!');
+    // Navigate back to home screen with the routine data
+    router.push({
+      pathname: '/',
+      params: { 
+        selectedRoutine: JSON.stringify(routine) 
+      }
+    });
   };
 
   const routinesByDay = {
@@ -368,7 +372,6 @@ export default function RoutinesScreen() {
               <RoutineCard
                 key={routine.id}
                 routine={routine}
-                onEdit={() => {}}
                 onDelete={handleDeleteRoutine}
                 onUse={handleUseRoutine}
               />
@@ -384,7 +387,6 @@ export default function RoutinesScreen() {
               <RoutineCard
                 key={routine.id}
                 routine={routine}
-                onEdit={() => {}}
                 onDelete={handleDeleteRoutine}
                 onUse={handleUseRoutine}
               />
@@ -400,7 +402,6 @@ export default function RoutinesScreen() {
               <RoutineCard
                 key={routine.id}
                 routine={routine}
-                onEdit={() => {}}
                 onDelete={handleDeleteRoutine}
                 onUse={handleUseRoutine}
               />
@@ -416,7 +417,6 @@ export default function RoutinesScreen() {
               <RoutineCard
                 key={routine.id}
                 routine={routine}
-                onEdit={() => {}}
                 onDelete={handleDeleteRoutine}
                 onUse={handleUseRoutine}
               />

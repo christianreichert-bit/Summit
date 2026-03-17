@@ -38,6 +38,15 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="routines"
+        options={{
+          title: "Routines",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "list" : "list-outline"} size={24} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",
@@ -46,6 +55,7 @@ export default function TabsLayout() {
           ),
         }}
       />
+      <Tabs.Screen name="auth" options={{ href: null }} /> 
     </Tabs>
   );
 }

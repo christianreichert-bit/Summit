@@ -1,5 +1,5 @@
 // app/(tabs)/index.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import { Pressable } from 'react-native';
 import {
@@ -15,10 +15,11 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Routine, Exercise, WorkoutLog } from '../types';  // If types in root
+import { Routine, Exercise, WorkoutLog } from '../../types';  // If types in root
 import exercisesData from '../../assets/data/exercises.json';  // If assets in root
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase } from './backend/supabaseClient';
+import { supabase } from '../backend/supabaseClient';
+import ExerciseSearchModal from '../../components/ExerciseSearchModal';
 
 const STORAGE_KEY = '@workout_logs';
 const SESSION_KEY = '@currentSessionId';
@@ -128,48 +129,16 @@ const SetRow = ({ set, onUpdateSet, onToggleComplete }) => {
 };
 
 // Exercise Card Component
-const ExerciseCard = ({ exercise, onRemove, onUpdateSet, onToggleSet }) => {
+const ExerciseCard = ({
+  exercise,
+  onRemove,
+  onUpdateSet,
+  onToggleSet,
+  onAddSet,
+  onRemoveSet,
+  onReplace = (_id: string) => {},
+}) => {
   const [expanded, setExpanded] = useState(true);
-  const [setCountInput, setSetCountInput] = useState(exercise.setCount);
-
-  useEffect(() => {
-    setSetCountInput(exercise.setCount);
-  }, [exercise.setCount]);
-
-  const handleSetCountChange = (text) => {
-    setSetCountInput(text);
-  };
-
-  const handleSetCountSubmit = () => {
-    let newCount = parseInt(setCountInput) || 0;
-    newCount = Math.min(Math.max(newCount, 1), 10);
-    setSetCountInput(newCount.toString());
-    
-    // Update sets
-    const currentSets = exercise.sets;
-    let newSets = [];
-    
-    if (newCount > currentSets.length) {
-      newSets = [...currentSets];
-      for (let i = currentSets.length + 1; i <= newCount; i++) {
-        newSets.push({
-          setNumber: i,
-          reps: '10',
-          weight: '',
-          completed: false,
-        });
-      }
-    } else if (newCount < currentSets.length) {
-      newSets = currentSets.slice(0, newCount);
-    } else {
-      newSets = currentSets;
-    }
-
-    // Update each set
-    newSets.forEach((set, index) => {
-      onUpdateSet(set.setNumber, 'setNumber', index + 1);
-    });
-  };
 
   const handleUpdateSet = (setNumber, field, value) => {
     onUpdateSet(setNumber, field, value);
@@ -190,17 +159,26 @@ const ExerciseCard = ({ exercise, onRemove, onUpdateSet, onToggleSet }) => {
             <Text style={styles.exerciseName}>{exercise.name}</Text>
             <View style={styles.exerciseMetaRow}>
               <View style={styles.setCountContainer}>
-                <TextInput
-                  style={styles.setCountInput}
-                  value={setCountInput}
-                  onChangeText={handleSetCountChange}
-                  onBlur={handleSetCountSubmit}
-                  onSubmitEditing={handleSetCountSubmit}
-                  keyboardType="numeric"
-                  maxLength={2}
-                  selectionColor="#FF6B00"
-                />
+                <Text style={styles.setCountValue}>{exercise.sets.length}</Text>
                 <Text style={styles.exerciseMeta}>sets</Text>
+              </View>
+              <View style={styles.setAdjustControls}>
+                <TouchableOpacity
+                  style={styles.setAdjustButton}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    onRemoveSet(exercise.id);
+                  }}>
+                  <Text style={styles.setAdjustButtonText}>−</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.setAdjustButton}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    onAddSet(exercise.id);
+                  }}>
+                  <Text style={styles.setAdjustButtonText}>+</Text>
+                </TouchableOpacity>
               </View>
               <Text style={styles.exerciseMeta}>• {exercise.muscleGroup}</Text>
               {completedCount > 0 && (
@@ -212,15 +190,26 @@ const ExerciseCard = ({ exercise, onRemove, onUpdateSet, onToggleSet }) => {
           </View>
         </View>
         
-        <TouchableOpacity
-          style={styles.removeButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            onRemove(exercise.id);
-          }}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Text style={styles.removeIcon}>−</Text>
-        </TouchableOpacity>
+        <View style={styles.exerciseActions}>
+          <TouchableOpacity
+            style={styles.replaceButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              onReplace(exercise.id);
+            }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Text style={styles.replaceIcon}>⟳</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.removeButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              onRemove(exercise.id);
+            }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Text style={styles.removeIcon}>−</Text>
+          </TouchableOpacity>
+        </View>
       </TouchableOpacity>
 
       {/* Expanded Sets Table */}
@@ -263,6 +252,8 @@ export default function TodayScreen() {
   const [selectedRoutine, setSelectedRoutine] = useState<Routine | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [sessionData, setSessionData] = useState<any>(null);
+  const [showExerciseModal, setShowExerciseModal] = useState(false);
+  const [replaceExerciseId, setReplaceExerciseId] = useState<string | null>(null);
 
   // Load session status and user ID on mount
   useEffect(() => {
@@ -498,6 +489,171 @@ export default function TodayScreen() {
 
   const handleRemoveExercise = (exerciseId: string) => {
     setExercises(exercises.filter((ex) => ex.id !== exerciseId));
+  };
+
+  const handleAddExercise = async (selectedEx: any) => {
+    if (!currentSessionId) return;
+    try {
+      const { data: createdEx, error: exError } = await supabase
+        .from('session_exercises')
+        .insert({
+          session_id: currentSessionId,
+          exercise_id: selectedEx.id,
+          exercise_name: selectedEx.name,
+          exercise_order: exercises.length + 1,
+        })
+        .select()
+        .single();
+
+      if (exError) throw exError;
+
+      const defaultSets = Array.from({ length: 3 }, (_, i) => ({
+        session_exercise_id: createdEx.session_exercise_id,
+        set_number: i + 1,
+        weight: null,
+        reps: null,
+        is_warmup: false,
+        completed: false,
+      }));
+
+      const { error: setsError } = await supabase
+        .from('session_exercise_sets')
+        .insert(defaultSets);
+
+      if (setsError) throw setsError;
+
+      const newExercise: Exercise = {
+        id: createdEx.session_exercise_id,
+        name: selectedEx.name,
+        muscleGroup: selectedEx.primaryMuscles?.[0] || 'General',
+        setCount: '3',
+        sets: defaultSets.map((s) => ({
+          setNumber: s.set_number,
+          reps: '',
+          weight: '',
+          completed: false,
+        })),
+      };
+      setExercises((prev) => [...prev, newExercise]);
+    } catch (error: any) {
+      console.error('Failed to add exercise:', error);
+      Alert.alert('Error', 'Failed to add exercise');
+    }
+  };
+
+  const handleReplaceExercise = async (exerciseId: string, selectedEx: any) => {
+    try {
+      await supabase
+        .from('session_exercises')
+        .update({
+          exercise_id: selectedEx.id,
+          exercise_name: selectedEx.name,
+        })
+        .eq('session_exercise_id', exerciseId);
+
+      setExercises((prev) =>
+        prev.map((ex) =>
+          ex.id === exerciseId
+            ? { ...ex, name: selectedEx.name, muscleGroup: selectedEx.primaryMuscles?.[0] || 'General' }
+            : ex
+        )
+      );
+    } catch (error: any) {
+      console.error('Failed to replace exercise:', error);
+      Alert.alert('Error', 'Failed to replace exercise');
+    }
+  };
+
+  const handleExerciseSelected = async (selectedEx: any) => {
+    setShowExerciseModal(false);
+    if (replaceExerciseId) {
+      await handleReplaceExercise(replaceExerciseId, selectedEx);
+    } else {
+      await handleAddExercise(selectedEx);
+    }
+    setReplaceExerciseId(null);
+  };
+
+  const handleAddSet = async (exerciseId: string) => {
+    try {
+      const exercise = exercises.find((ex) => ex.id === exerciseId);
+      if (!exercise) return;
+
+      const newSetNumber = exercise.sets.length + 1;
+
+      const { error } = await supabase
+        .from('session_exercise_sets')
+        .insert({
+          session_exercise_id: exerciseId,
+          set_number: newSetNumber,
+          weight: null,
+          reps: null,
+          is_warmup: false,
+          completed: false,
+        });
+
+      if (error) throw error;
+
+      setExercises((prev) =>
+        prev.map((ex) =>
+          ex.id === exerciseId
+            ? {
+                ...ex,
+                setCount: (ex.sets.length + 1).toString(),
+                sets: [
+                  ...ex.sets,
+                  {
+                    setNumber: newSetNumber,
+                    reps: '',
+                    weight: '',
+                    completed: false,
+                  },
+                ],
+              }
+            : ex
+        )
+      );
+    } catch (error) {
+      console.error('Failed to add set:', error);
+      Alert.alert('Error', 'Failed to add set');
+    }
+  };
+
+  const handleRemoveSet = async (exerciseId: string) => {
+    try {
+      const exercise = exercises.find((ex) => ex.id === exerciseId);
+      if (!exercise) return;
+
+      if (exercise.sets.length <= 1) {
+        Alert.alert('Minimum Reached', 'Each exercise needs at least 1 set.');
+        return;
+      }
+
+      const lastSetNumber = exercise.sets.length;
+
+      const { error } = await supabase
+        .from('session_exercise_sets')
+        .delete()
+        .eq('session_exercise_id', exerciseId)
+        .eq('set_number', lastSetNumber);
+
+      if (error) throw error;
+
+      setExercises((prev) =>
+        prev.map((ex) =>
+          ex.id === exerciseId
+            ? {
+                ...ex,
+                setCount: (ex.sets.length - 1).toString(),
+                sets: ex.sets.slice(0, -1),
+              }
+            : ex
+        )
+      );
+    } catch (error) {
+      console.error('Failed to remove set:', error);
+      Alert.alert('Error', 'Failed to remove set');
+    }
   };
 
   const handleUpdateSet = async (exerciseId: string, setNumber: number, field: string, value: any) => {
@@ -760,10 +916,16 @@ export default function TodayScreen() {
               key={exercise.id}
               exercise={exercise}
               onRemove={handleRemoveExercise}
-              onUpdateSet={(setNum, field, value) => 
+              onUpdateSet={(setNum, field, value) =>
                 handleUpdateSet(exercise.id, setNum, field, value)
               }
               onToggleSet={handleToggleSet}
+              onAddSet={handleAddSet}
+              onRemoveSet={handleRemoveSet}
+              onReplace={(id) => {
+                setReplaceExerciseId(id);
+                setShowExerciseModal(true);
+              }}
             />
           ))}
 
@@ -772,8 +934,28 @@ export default function TodayScreen() {
               <Text style={styles.emptyStateText}>No exercises in this routine</Text>
             </View>
           )}
+
+          <TouchableOpacity
+            style={styles.addExerciseButton}
+            onPress={() => {
+              setReplaceExerciseId(null);
+              setShowExerciseModal(true);
+            }}>
+            <Text style={styles.addExerciseButtonText}>+ Add Exercise</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
+
+        {/* Exercise Search Modal (add & replace) */}
+        <ExerciseSearchModal
+          visible={showExerciseModal}
+          title={replaceExerciseId ? 'Replace Exercise' : 'Add Exercise'}
+          onClose={() => {
+            setShowExerciseModal(false);
+            setReplaceExerciseId(null);
+          }}
+          onSelect={handleExerciseSelected}
+        />
     </SafeAreaView>
   );
 }
@@ -917,6 +1099,36 @@ const styles = StyleSheet.create({
     width: 24,
     textAlign: 'center',
   },
+  setCountValue: {
+    color: '#FF6B00',
+    fontSize: 12,
+    fontWeight: '700',
+    marginRight: 4,
+    minWidth: 18,
+    textAlign: 'center',
+  },
+  setAdjustControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 8,
+    gap: 6,
+  },
+  setAdjustButton: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#000000',
+  },
+  setAdjustButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 15,
+  },
   exerciseMeta: {
     fontSize: 12,
     color: '#888',
@@ -933,6 +1145,34 @@ const styles = StyleSheet.create({
     color: '#FF6B00',
     fontSize: 20,
     fontWeight: 'bold',
+  },
+  exerciseActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  replaceButton: {
+    padding: 4,
+  },
+  replaceIcon: {
+    color: '#888',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  addExerciseButton: {
+    borderWidth: 1,
+    borderColor: '#FF6B00',
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  addExerciseButtonText: {
+    color: '#FF6B00',
+    fontSize: 15,
+    fontWeight: '600',
   },
   setsTable: {
     borderTopWidth: 1,

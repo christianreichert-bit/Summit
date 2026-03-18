@@ -1,4 +1,4 @@
-// app/routines.tsx
+// app/(tabs)/routines.tsx
 import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
@@ -9,13 +9,12 @@ import {
   Platform,
   Modal,
   TextInput,
-  FlatList,
   SafeAreaView,
   Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Routine, RoutineExercise } from './types';
-import exercisesData from '../assets/data/exercises.json';
+import { Routine, RoutineExercise } from '../../types';
+import ExerciseSearchModal from '../../components/ExerciseSearchModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 
@@ -74,24 +73,19 @@ const CreateRoutineModal = ({ visible, onClose, onSave }) => {
   const [routineName, setRoutineName] = useState('');
   const [selectedDay, setSelectedDay] = useState<'Push' | 'Pull' | 'Legs' | 'Custom'>('Push');
   const [customDayName, setCustomDayName] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
   const [selectedExercises, setSelectedExercises] = useState<RoutineExercise[]>([]);
+  const [showSearchModal, setShowSearchModal] = useState(false);
 
   const days: ('Push' | 'Pull' | 'Legs' | 'Custom')[] = ['Push', 'Pull', 'Legs', 'Custom'];
 
-  const filteredExercises = exercisesData.filter(exercise =>
-    exercise.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const handleAddExercise = (exercise) => {
+  const handleAddExercise = (exercise: any) => {
     const newExercise: RoutineExercise = {
       exerciseId: exercise.id,
       name: exercise.name,
-      muscleGroup: exercise.primaryMuscles[0] || 'Other',
+      muscleGroup: exercise.primaryMuscles?.[0] || 'Other',
       defaultSetCount: 3,
     };
     setSelectedExercises([...selectedExercises, newExercise]);
-    setSearchQuery('');
   };
 
   const handleRemoveExercise = (index: number) => {
@@ -128,12 +122,10 @@ const CreateRoutineModal = ({ visible, onClose, onSave }) => {
     };
 
     onSave(newRoutine);
-    // Reset form
     setRoutineName('');
     setSelectedDay('Push');
     setCustomDayName('');
     setSelectedExercises([]);
-    setSearchQuery('');
   };
 
   return (
@@ -152,7 +144,6 @@ const CreateRoutineModal = ({ visible, onClose, onSave }) => {
           </View>
 
           <ScrollView style={styles.modalScroll}>
-            {/* Routine Name */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Routine Name</Text>
               <TextInput
@@ -164,7 +155,6 @@ const CreateRoutineModal = ({ visible, onClose, onSave }) => {
               />
             </View>
 
-            {/* Day Selection */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Day</Text>
               <View style={styles.dayButtons}>
@@ -188,7 +178,6 @@ const CreateRoutineModal = ({ visible, onClose, onSave }) => {
               </View>
             </View>
 
-            {/* Custom Day Name */}
             {selectedDay === 'Custom' && (
               <View style={styles.inputGroup}>
                 <TextInput
@@ -201,42 +190,16 @@ const CreateRoutineModal = ({ visible, onClose, onSave }) => {
               </View>
             )}
 
-            {/* Exercise Search */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Add Exercises</Text>
-              <TextInput
-                style={styles.input}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder="Search exercises..."
-                placeholderTextColor="#666"
-              />
+              <TouchableOpacity
+                style={styles.searchButton}
+                onPress={() => setShowSearchModal(true)}>
+                <Text style={styles.searchButtonPlaceholder}>Search exercises...</Text>
+                <Text style={styles.addIcon}>+</Text>
+              </TouchableOpacity>
             </View>
 
-            {/* Search Results */}
-            {searchQuery.length > 0 && (
-              <View style={styles.searchResults}>
-                <FlatList
-                  data={filteredExercises.slice(0, 5)}
-                  keyExtractor={(item) => item.id}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={styles.searchResultItem}
-                      onPress={() => handleAddExercise(item)}>
-                      <View>
-                        <Text style={styles.searchResultName}>{item.name}</Text>
-                        <Text style={styles.searchResultMuscle}>
-                          {item.primaryMuscles?.join(', ')}
-                        </Text>
-                      </View>
-                      <Text style={styles.addIcon}>+</Text>
-                    </TouchableOpacity>
-                  )}
-                />
-              </View>
-            )}
-
-            {/* Selected Exercises */}
             {selectedExercises.length > 0 && (
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Selected Exercises</Text>
@@ -272,6 +235,16 @@ const CreateRoutineModal = ({ visible, onClose, onSave }) => {
           </TouchableOpacity>
         </View>
       </View>
+
+      <ExerciseSearchModal
+        visible={showSearchModal}
+        title="Add Exercise"
+        onClose={() => setShowSearchModal(false)}
+        onSelect={(exercise) => {
+          handleAddExercise(exercise);
+          setShowSearchModal(false);
+        }}
+      />
     </Modal>
   );
 };
@@ -680,6 +653,20 @@ const styles = StyleSheet.create({
   searchResultMuscle: {
     fontSize: 12,
     color: '#888',
+  },
+  searchButton: {
+    backgroundColor: '#000000',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  searchButtonPlaceholder: {
+    color: '#666',
+    fontSize: 16,
   },
   addIcon: {
     color: '#FF6B00',

@@ -15,8 +15,8 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Routine, Exercise, WorkoutLog } from '../../types';  // If types in root
-import exercisesData from '../../assets/data/exercises.json';  // If assets in root
+import { Routine, Exercise, WorkoutLog } from '../../types';
+import exercisesData from '../../assets/data/exercises.json';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../backend/supabaseClient';
 import ExerciseSearchModal from '../../components/ExerciseSearchModal';
@@ -43,32 +43,6 @@ const getCurrentTime = () => {
     minute: '2-digit',
   });
 };
-
-// Sample initial exercises
-const initialExercises: Exercise[] = [
-  {
-    id: '1',
-    name: 'Barbell Bench Press',
-    muscleGroup: 'Chest',
-    setCount: '3',
-    sets: [
-      { setNumber: 1, reps: '10', weight: '135', completed: false },
-      { setNumber: 2, reps: '8', weight: '155', completed: false },
-      { setNumber: 3, reps: '6', weight: '175', completed: false },
-    ],
-  },
-  {
-    id: '2',
-    name: 'Barbell Squat',
-    muscleGroup: 'Legs',
-    setCount: '3',
-    sets: [
-      { setNumber: 1, reps: '10', weight: '185', completed: false },
-      { setNumber: 2, reps: '8', weight: '205', completed: false },
-      { setNumber: 3, reps: '6', weight: '225', completed: false },
-    ],
-  },
-];
 
 // Set Row Component
 const SetRow = ({ set, onUpdateSet, onToggleComplete }) => {
@@ -108,7 +82,7 @@ const SetRow = ({ set, onUpdateSet, onToggleComplete }) => {
           keyboardType="numeric"
           placeholder="0"
           placeholderTextColor="#444"
-          selectionColor="#FF6B00"
+          selectionColor="#0066CC"
           editable={!set.completed}
         />
       </View>
@@ -120,7 +94,7 @@ const SetRow = ({ set, onUpdateSet, onToggleComplete }) => {
           keyboardType="numeric"
           placeholder="0"
           placeholderTextColor="#444"
-          selectionColor="#FF6B00"
+          selectionColor="#0066CC"
           editable={!set.completed}
         />
       </View>
@@ -245,6 +219,7 @@ const ExerciseCard = ({
 };
 
 export default function TodayScreen() {
+  const router = useRouter();
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [exercises, setExercises] = useState<Exercise[]>([]);
@@ -263,19 +238,15 @@ export default function TodayScreen() {
   const initializeScreen = async () => {
     setLoading(true);
     try {
-      // Get user ID from AsyncStorage
       const storedUserId = await AsyncStorage.getItem('userId');
       setUserId(storedUserId);
 
-      // Check if there's an active session
       const sessionId = await AsyncStorage.getItem(SESSION_KEY);
       
       if (sessionId) {
-        // Load active session data
         await loadSession(sessionId);
         setCurrentSessionId(sessionId);
       } else {
-        // No active session, load routines for selection
         await loadRoutines(storedUserId);
       }
     } catch (error) {
@@ -303,7 +274,6 @@ export default function TodayScreen() {
 
   const loadSession = async (sessionId: string) => {
     try {
-      // Fetch session data with exercises and sets
       const { data: session, error: sessionError } = await supabase
         .from('workout_sessions')
         .select('*')
@@ -325,11 +295,10 @@ export default function TodayScreen() {
 
       setSessionData(session);
 
-      // Transform to Exercise format
       const transformedExercises: Exercise[] = sessionExercises.map(ex => ({
         id: ex.session_exercise_id,
         name: ex.exercise_name,
-        muscleGroup: 'General', // You may want to fetch this
+        muscleGroup: 'General',
         setCount: ex.session_exercise_sets?.length.toString() || '3',
         sets: ex.session_exercise_sets?.map((set: any) => ({
           setNumber: set.set_number,
@@ -343,7 +312,6 @@ export default function TodayScreen() {
     } catch (error) {
       console.error('Failed to load session:', error);
       Alert.alert('Error', 'Failed to load session');
-      // Clear invalid session
       await AsyncStorage.removeItem(SESSION_KEY);
       setCurrentSessionId(null);
       await loadRoutines(userId);
@@ -367,18 +335,14 @@ export default function TodayScreen() {
       console.log('User ID:', userId);
       
       const now = new Date();
-      const sessionDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
-      const startTime = now.toISOString().split('T')[1].split('.')[0]; // HH:MM:SS
+      const sessionDate = now.toISOString().split('T')[0];
+      const startTime = now.toISOString().split('T')[1].split('.')[0];
       
-      console.log('Session date:', sessionDate);
-      console.log('Start time:', startTime);
-      
-      // Create workout session (routine_id is nullable since routines are in AsyncStorage)
       const { data: session, error: sessionError } = await supabase
         .from('workout_sessions')
         .insert({
           user_id: userId,
-          routine_id: null, // Routine is in AsyncStorage, not in DB
+          routine_id: null,
           session_name: selectedRoutine.name,
           session_date: sessionDate,
           start_time: startTime,
@@ -393,10 +357,9 @@ export default function TodayScreen() {
       
       console.log('Session created:', session);
 
-      // Create session exercises
       const sessionExercises = selectedRoutine.exercises.map((ex, index) => ({
         session_id: session.session_id,
-        exercise_id: ex.exerciseId || ex.name, // Use exerciseId or name as fallback
+        exercise_id: ex.exerciseId || ex.name,
         exercise_name: ex.name,
         exercise_order: index + 1,
       }));
@@ -415,18 +378,30 @@ export default function TodayScreen() {
 
       console.log('Exercises created:', createdExercises);
 
-      // Create default sets for each exercise
+      // Create sets using saved data if available
       const allSets = createdExercises.flatMap((ex, index) => {
         const routineEx = selectedRoutine.exercises[index];
-        const setCount = routineEx?.defaultSetCount || 3;
-        return Array.from({ length: setCount }, (_, i) => ({
-          session_exercise_id: ex.session_exercise_id,
-          set_number: i + 1,
-          weight: null,
-          reps: null,
-          is_warmup: false,
-          completed: false,
-        }));
+        
+        if (routineEx.sets && routineEx.sets.length > 0) {
+          return routineEx.sets.map(set => ({
+            session_exercise_id: ex.session_exercise_id,
+            set_number: set.setNumber,
+            weight: set.weight ? parseFloat(set.weight) : null,
+            reps: set.reps ? parseInt(set.reps) : null,
+            is_warmup: false,
+            completed: false,
+          }));
+        } else {
+          const setCount = routineEx?.defaultSetCount || 3;
+          return Array.from({ length: setCount }, (_, i) => ({
+            session_exercise_id: ex.session_exercise_id,
+            set_number: i + 1,
+            weight: null,
+            reps: null,
+            is_warmup: false,
+            completed: false,
+          }));
+        }
       });
 
       console.log('Creating sets:', allSets);
@@ -442,12 +417,9 @@ export default function TodayScreen() {
 
       console.log('Sets created successfully');
 
-      // Save session ID to AsyncStorage
       await AsyncStorage.setItem(SESSION_KEY, session.session_id);
       setCurrentSessionId(session.session_id);
       
-      console.log('Loading session...');
-      // Load the session
       await loadSession(session.session_id);
       console.log('Session loaded successfully');
     } catch (error: any) {
@@ -462,24 +434,20 @@ export default function TodayScreen() {
     if (!currentSessionId) return;
     
     try {
-      const endTime = new Date().toISOString().split('T')[1].split('.')[0]; // HH:MM:SS
+      const endTime = new Date().toISOString().split('T')[1].split('.')[0];
       
-      // Update session end time
       await supabase
         .from('workout_sessions')
         .update({ end_time: endTime })
         .eq('session_id', currentSessionId);
 
-      // Clear session from AsyncStorage
       await AsyncStorage.removeItem(SESSION_KEY);
       
-      // Reset all state to show routine selection
       setCurrentSessionId(null);
       setExercises([]);
       setSelectedRoutine(null);
       setSessionData(null);
       
-      // Reload routines for selection
       await loadRoutines(userId);
     } catch (error) {
       console.error('Failed to end session:', error);
@@ -657,7 +625,6 @@ export default function TodayScreen() {
   };
 
   const handleUpdateSet = async (exerciseId: string, setNumber: number, field: string, value: any) => {
-    // Update local state
     setExercises(
       exercises.map((exercise) => {
         if (exercise.id === exerciseId) {
@@ -672,15 +639,10 @@ export default function TodayScreen() {
       })
     );
 
-    // Update in database
     try {
       const exercise = exercises.find(ex => ex.id === exerciseId);
       if (!exercise) return;
 
-      const set = exercise.sets.find(s => s.setNumber === setNumber);
-      if (!set) return;
-
-      // Get the session_set_id from database
       const { data: setData, error } = await supabase
         .from('session_exercise_sets')
         .select('session_set_id')
@@ -711,7 +673,6 @@ export default function TodayScreen() {
 
     const newCompleted = !set.completed;
 
-    // Update local state
     setExercises(
       exercises.map((exercise) => {
         if (exercise.id === exerciseId) {
@@ -728,7 +689,6 @@ export default function TodayScreen() {
       })
     );
 
-    // Update completed status in database
     try {
       const { data: setData, error } = await supabase
         .from('session_exercise_sets')
@@ -757,14 +717,11 @@ export default function TodayScreen() {
 
   const handleSignOut = async () => {
     try {
-      // Clear user data from AsyncStorage
       await AsyncStorage.removeItem('userId');
       await AsyncStorage.removeItem(SESSION_KEY);
       
-      // Sign out from Supabase
       await supabase.auth.signOut();
       
-      // Reset state
       setUserId(null);
       setCurrentSessionId(null);
       setExercises([]);
@@ -778,24 +735,22 @@ export default function TodayScreen() {
     }
   };
 
-  // Show loading screen
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#FF6B00" />
+          <ActivityIndicator size="large" color="#0066CC" />
           <Text style={styles.loadingText}>Loading...</Text>
         </View>
       </SafeAreaView>
     );
   }
 
-  // Show routine selection screen if no active session
   if (!currentSessionId) {
     return (
       <SafeAreaView style={styles.container}>
         <LinearGradient
-          colors={['#FF6B00', '#FF8C40']}
+          colors={['#0066CC', '#4A9EFF']}
           style={styles.header}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}>
@@ -861,7 +816,6 @@ export default function TodayScreen() {
     );
   }
 
-  // Show active workout session
   const completedSets = exercises.reduce(
     (acc, ex) => acc + ex.sets.filter((s) => s.completed).length,
     0
@@ -876,9 +830,8 @@ export default function TodayScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled">
         
-        {/* Header with Date and Progress */}
         <LinearGradient
-          colors={['#FF6B00', '#FF8C40']}
+          colors={['#0066CC', '#4A9EFF']}
           style={styles.header}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}>
@@ -894,13 +847,11 @@ export default function TodayScreen() {
             </View>
           </View>
           
-          {/* Progress Bar */}
           <View style={styles.progressBar}>
             <View style={[styles.progressFill, { width: `${progress}%` }]} />
           </View>
         </LinearGradient>
 
-        {/* Exercises List */}
         <View style={styles.exercisesContainer}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>{sessionData?.session_name || 'Workout'}</Text>
@@ -946,16 +897,15 @@ export default function TodayScreen() {
         </View>
       </ScrollView>
 
-        {/* Exercise Search Modal (add & replace) */}
-        <ExerciseSearchModal
-          visible={showExerciseModal}
-          title={replaceExerciseId ? 'Replace Exercise' : 'Add Exercise'}
-          onClose={() => {
-            setShowExerciseModal(false);
-            setReplaceExerciseId(null);
-          }}
-          onSelect={handleExerciseSelected}
-        />
+      <ExerciseSearchModal
+        visible={showExerciseModal}
+        title={replaceExerciseId ? 'Replace Exercise' : 'Add Exercise'}
+        onClose={() => {
+          setShowExerciseModal(false);
+          setReplaceExerciseId(null);
+        }}
+        onSelect={handleExerciseSelected}
+      />
     </SafeAreaView>
   );
 }
@@ -1063,7 +1013,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   chevron: {
-    color: '#FF6B00',
+    color: '#0066CC',
     fontSize: 16,
     marginRight: 8,
   },
@@ -1092,7 +1042,7 @@ const styles = StyleSheet.create({
     borderColor: '#333',
   },
   setCountInput: {
-    color: '#FF6B00',
+    color: '#0066CC',
     fontSize: 12,
     fontWeight: '600',
     padding: 2,
@@ -1100,7 +1050,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   setCountValue: {
-    color: '#FF6B00',
+    color: '#0066CC',
     fontSize: 12,
     fontWeight: '700',
     marginRight: 4,
@@ -1142,7 +1092,7 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   removeIcon: {
-    color: '#FF6B00',
+    color: '#0066CC',
     fontSize: 20,
     fontWeight: 'bold',
   },
@@ -1161,7 +1111,7 @@ const styles = StyleSheet.create({
   },
   addExerciseButton: {
     borderWidth: 1,
-    borderColor: '#FF6B00',
+    borderColor: '#0066CC',
     borderStyle: 'dashed',
     borderRadius: 12,
     padding: 14,
@@ -1170,7 +1120,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   addExerciseButtonText: {
-    color: '#FF6B00',
+    color: '#0066CC',
     fontSize: 15,
     fontWeight: '600',
   },
@@ -1212,13 +1162,13 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#FF6B00',
+    borderColor: '#0066CC',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 8,
   },
   checkboxCompleted: {
-    backgroundColor: '#FF6B00',
+    backgroundColor: '#0066CC',
   },
   checkmark: {
     color: '#FFFFFF',
@@ -1267,7 +1217,6 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 14,
   },
-  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.95)',
@@ -1295,7 +1244,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   closeButton: {
-    color: '#FF6B00',
+    color: '#0066CC',
     fontSize: 24,
   },
   routineListItem: {
@@ -1309,8 +1258,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   routineListItemSelected: {
-    borderColor: '#FF6B00',
-    backgroundColor: 'rgba(255,107,0,0.1)',
+    borderColor: '#0066CC',
+    backgroundColor: 'rgba(0,102,204,0.1)',
   },
   routineListItemContent: {
     flex: 1,
@@ -1326,7 +1275,7 @@ const styles = StyleSheet.create({
     color: '#888',
   },
   addButton: {
-    backgroundColor: '#FF6B00',
+    backgroundColor: '#0066CC',
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -1340,7 +1289,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
-  // Loading Screen
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -1352,7 +1300,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginTop: 16,
   },
-  // Routine Selection Screen
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1393,8 +1340,8 @@ const styles = StyleSheet.create({
     borderColor: '#333',
   },
   routineCardSelected: {
-    borderColor: '#FF6B00',
-    backgroundColor: 'rgba(255,107,0,0.1)',
+    borderColor: '#0066CC',
+    backgroundColor: 'rgba(0,102,204,0.1)',
   },
   routineCardContent: {
     gap: 8,
@@ -1410,7 +1357,7 @@ const styles = StyleSheet.create({
   },
   selectedCheckmark: {
     fontSize: 14,
-    color: '#FF6B00',
+    color: '#0066CC',
     fontWeight: '600',
     marginTop: 4,
   },
@@ -1421,7 +1368,7 @@ const styles = StyleSheet.create({
     borderTopColor: '#333',
   },
   startButton: {
-    backgroundColor: '#FF6B00',
+    backgroundColor: '#0066CC',
     padding: 18,
     borderRadius: 12,
     alignItems: 'center',
@@ -1432,7 +1379,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   endSessionButton: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#0066CC',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 8,

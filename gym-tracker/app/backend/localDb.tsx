@@ -1,4 +1,6 @@
-import { useState } from "react";
+import ExerciseSearchModal from "@/components/ExerciseSearchModal";
+import React from "react";
+import { View } from "react-native";
 
 type User = {
   user_id: string;
@@ -584,3 +586,6 @@ export const localDb = {
     return { data: history, error: null };
   },
 };
+View >
+
+  <ExerciseSearchModal></ExerciseSearchModal>;

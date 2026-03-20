@@ -1,3 +1,13 @@
+## Welcome to Summit! Made by: Christian Reichert, Omor Ogieva, and Kevin Sullivan
+The goal of this app is to make Tracking your gym sessions as simple and easy as possible, with the least amount of tedious interactions! As well as the capability to see your progress along the way.
+
+This App is a Gym tracker app that will be a React Native mobile app that can be used by anyone to track their workouts as easily as possible. It will use a database backend to store all of a persons data to which someone can look back and make their own conclusions.
+
+## Team shared google Drive:
+https://drive.google.com/drive/u/1/folders/1DlmlplKgfR-j5zU0HSnJMkOVL0NGDNDF
+
+Current MVP goals: -Tracks weight reps sets, for specific workout sessions, -import routines automatically into daily workouts, -Login into app possibly with google Auth -add and remove exercises, -create custom routines
+
 # Welcome to your Expo app 👋
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
@@ -25,15 +35,6 @@ In the output, you'll find options to open the app in a
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
 
 ## Learn more
 
@@ -42,9 +43,3 @@ To learn more about developing your project with Expo, look at the following res
 - [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
 - [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
 
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.

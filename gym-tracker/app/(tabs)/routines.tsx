@@ -20,9 +20,13 @@ import { useRouter } from 'expo-router';
 
 const STORAGE_KEY = '@routines';
 
-// Routine Card Component
-const RoutineCard = ({ routine, onDelete, onUse }) => {
+// Routine Card Component with Edit and Delete
+const RoutineCard = ({ routine, onDelete, onUse, onEdit }) => {
   const [expanded, setExpanded] = useState(false);
+
+  const handleDelete = () => {
+    onDelete(routine.id);
+  };
 
   return (
     <View style={styles.routineCard}>
@@ -41,9 +45,17 @@ const RoutineCard = ({ routine, onDelete, onUse }) => {
         </View>
         <View style={styles.routineHeaderRight}>
           <Text style={styles.exerciseCount}>{routine.exercises.length} exercises</Text>
-          <TouchableOpacity onPress={() => onUse(routine)} style={styles.useButton}>
-            <Text style={styles.useButtonText}>+</Text>
-          </TouchableOpacity>
+          <View style={styles.actionButtons}>
+            <TouchableOpacity onPress={() => onEdit(routine)} style={styles.editButton}>
+              <Text style={styles.editButtonText}>✎</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleDelete} style={styles.deleteButton}>
+              <Text style={styles.deleteButtonText}>🗑</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => onUse(routine)} style={styles.useButton}>
+              <Text style={styles.useButtonText}>+</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </TouchableOpacity>
 
@@ -86,9 +98,8 @@ const RoutineCard = ({ routine, onDelete, onUse }) => {
     </View>
   );
 };
-
-// Create Routine Modal
-const CreateRoutineModal = ({ visible, onClose, onSave }) => {
+// Create/Edit Routine Modal
+const CreateEditRoutineModal = ({ visible, onClose, onSave, editingRoutine }) => {
   const [routineName, setRoutineName] = useState('');
   const [selectedDay, setSelectedDay] = useState<'Push' | 'Pull' | 'Legs' | 'Custom'>('Push');
   const [customDayName, setCustomDayName] = useState('');
@@ -97,119 +108,125 @@ const CreateRoutineModal = ({ visible, onClose, onSave }) => {
 
   const days: ('Push' | 'Pull' | 'Legs' | 'Custom')[] = ['Push', 'Pull', 'Legs', 'Custom'];
 
-  const handleAddExercise = (exercise: any) => {
-  const defaultSetCount = 3;
-  const defaultSets = Array.from({ length: defaultSetCount }, (_, i) => ({
-    setNumber: i + 1,
-    reps: '',
-    weight: '',
-  }));
+  // Load editing routine data when modal opens
+  useEffect(() => {
+    if (editingRoutine) {
+      setRoutineName(editingRoutine.name);
+      setSelectedDay(editingRoutine.day);
+      setCustomDayName(editingRoutine.customDayName || '');
+      setSelectedExercises(editingRoutine.exercises);
+    } else {
+      resetForm();
+    }
+  }, [editingRoutine]);
 
-  const newExercise: RoutineExercise = {
-    exerciseId: exercise.id,
-    name: exercise.name,
-    muscleGroup: exercise.primaryMuscles?.[0] || 'Other',
-    defaultSetCount: defaultSetCount,
-    sets: defaultSets,
+  const handleAddExercise = (exercise: any) => {
+    const defaultSetCount = 3;
+    const defaultSets = Array.from({ length: defaultSetCount }, (_, i) => ({
+      setNumber: i + 1,
+      reps: '',
+      weight: '',
+    }));
+
+    const newExercise: RoutineExercise = {
+      exerciseId: exercise.id,
+      name: exercise.name,
+      muscleGroup: exercise.primaryMuscles?.[0] || 'Other',
+      defaultSetCount: defaultSetCount,
+      sets: defaultSets,
+    };
+    setSelectedExercises([...selectedExercises, newExercise]);
   };
-  setSelectedExercises([...selectedExercises, newExercise]);
-};
 
   const handleRemoveExercise = (index: number) => {
     setSelectedExercises(selectedExercises.filter((_, i) => i !== index));
   };
   
   const handleUpdateSet = (exerciseIndex: number, setNumber: number, field: 'reps' | 'weight', value: string) => {
-  const updated = [...selectedExercises];
-  const exercise = updated[exerciseIndex];
-  if (exercise.sets) {
-    const setIndex = exercise.sets.findIndex(s => s.setNumber === setNumber);
-    if (setIndex !== -1) {
-      exercise.sets[setIndex] = { ...exercise.sets[setIndex], [field]: value };
-    }
-  }
-  setSelectedExercises(updated);
-};
-
-const handleAddSet = (exerciseIndex: number) => {
-  const updated = [...selectedExercises];
-  const exercise = updated[exerciseIndex];
-  const newSetNumber = (exercise.sets?.length || exercise.defaultSetCount) + 1;
-  
-  if (!exercise.sets) {
-    exercise.sets = [];
-  }
-  
-  exercise.sets.push({
-    setNumber: newSetNumber,
-    reps: '',
-    weight: '',
-  });
-  exercise.defaultSetCount = newSetNumber;
-  
-  setSelectedExercises(updated);
-};
-
-const handleRemoveSet = (exerciseIndex: number) => {
-  const updated = [...selectedExercises];
-  const exercise = updated[exerciseIndex];
-  
-  if (exercise.sets && exercise.sets.length > 1) {
-    exercise.sets = exercise.sets.slice(0, -1);
-    exercise.defaultSetCount = exercise.sets.length;
-  }
-  
-  setSelectedExercises(updated);
-};
-
-const resetForm = () => {
-  setRoutineName('');
-  setSelectedDay('Push');
-  setCustomDayName('');
-  setSelectedExercises([]);
-};
-
-  const handleUpdateSetCount = (index: number, count: number) => {
     const updated = [...selectedExercises];
-    updated[index].defaultSetCount = Math.min(Math.max(count, 1), 10);
+    const exercise = updated[exerciseIndex];
+    if (exercise.sets) {
+      const setIndex = exercise.sets.findIndex(s => s.setNumber === setNumber);
+      if (setIndex !== -1) {
+        exercise.sets[setIndex] = { ...exercise.sets[setIndex], [field]: value };
+      }
+    }
     setSelectedExercises(updated);
   };
 
-  const handleSave = () => {
-  if (!routineName.trim()) {
-    Alert.alert('Error', 'Please enter a routine name');
-    return;
-  }
-  if (selectedExercises.length === 0) {
-    Alert.alert('Error', 'Please add at least one exercise');
-    return;
-  }
-  if (selectedDay === 'Custom' && !customDayName.trim()) {
-    Alert.alert('Error', 'Please enter a custom day name');
-    return;
-  }
-
-  const exercisesWithSets = selectedExercises.map(ex => ({
-    ...ex,
-    sets: ex.sets || Array.from({ length: ex.defaultSetCount }, (_, i) => ({
-      setNumber: i + 1,
+  const handleAddSet = (exerciseIndex: number) => {
+    const updated = [...selectedExercises];
+    const exercise = updated[exerciseIndex];
+    const newSetNumber = (exercise.sets?.length || exercise.defaultSetCount) + 1;
+    
+    if (!exercise.sets) {
+      exercise.sets = [];
+    }
+    
+    exercise.sets.push({
+      setNumber: newSetNumber,
       reps: '',
       weight: '',
-    })),
-  }));
-
-  const newRoutine: Routine = {
-    id: Date.now().toString(),
-    name: routineName.trim(),
-    day: selectedDay,
-    customDayName: selectedDay === 'Custom' ? customDayName.trim() : undefined,
-    exercises: exercisesWithSets,
-    createdAt: new Date(),
+    });
+    exercise.defaultSetCount = newSetNumber;
+    
+    setSelectedExercises(updated);
   };
 
-  onSave(newRoutine);
-  resetForm();
-};
+  const handleRemoveSet = (exerciseIndex: number) => {
+    const updated = [...selectedExercises];
+    const exercise = updated[exerciseIndex];
+    
+    if (exercise.sets && exercise.sets.length > 1) {
+      exercise.sets = exercise.sets.slice(0, -1);
+      exercise.defaultSetCount = exercise.sets.length;
+    }
+    
+    setSelectedExercises(updated);
+  };
+
+  const resetForm = () => {
+    setRoutineName('');
+    setSelectedDay('Push');
+    setCustomDayName('');
+    setSelectedExercises([]);
+  };
+
+  const handleSave = () => {
+    if (!routineName.trim()) {
+      Alert.alert('Error', 'Please enter a routine name');
+      return;
+    }
+    if (selectedExercises.length === 0) {
+      Alert.alert('Error', 'Please add at least one exercise');
+      return;
+    }
+    if (selectedDay === 'Custom' && !customDayName.trim()) {
+      Alert.alert('Error', 'Please enter a custom day name');
+      return;
+    }
+
+    const exercisesWithSets = selectedExercises.map(ex => ({
+      ...ex,
+      sets: ex.sets || Array.from({ length: ex.defaultSetCount }, (_, i) => ({
+        setNumber: i + 1,
+        reps: '',
+        weight: '',
+      })),
+    }));
+
+    const routineData: Routine = {
+      id: editingRoutine ? editingRoutine.id : Date.now().toString(),
+      name: routineName.trim(),
+      day: selectedDay,
+      customDayName: selectedDay === 'Custom' ? customDayName.trim() : undefined,
+      exercises: exercisesWithSets,
+      createdAt: editingRoutine ? editingRoutine.createdAt : new Date(),
+    };
+
+    onSave(routineData);
+    resetForm();
+  };
 
   return (
     <Modal
@@ -220,7 +237,9 @@ const resetForm = () => {
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Create Routine</Text>
+            <Text style={styles.modalTitle}>
+              {editingRoutine ? 'Edit Routine' : 'Create Routine'}
+            </Text>
             <TouchableOpacity onPress={onClose}>
               <Text style={styles.closeButton}>✕</Text>
             </TouchableOpacity>
@@ -360,7 +379,9 @@ const resetForm = () => {
           </ScrollView>
 
           <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-            <Text style={styles.saveButtonText}>Create Routine</Text>
+            <Text style={styles.saveButtonText}>
+              {editingRoutine ? 'Update Routine' : 'Create Routine'}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -381,6 +402,7 @@ export default function RoutinesScreen() {
   const router = useRouter();
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingRoutine, setEditingRoutine] = useState<Routine | null>(null);
 
   useEffect(() => {
     loadRoutines();
@@ -410,6 +432,21 @@ export default function RoutinesScreen() {
     const updated = [...routines, newRoutine];
     saveRoutines(updated);
     setShowCreateModal(false);
+    setEditingRoutine(null);
+  };
+
+  const handleEditRoutine = (routine: Routine) => {
+    setEditingRoutine(routine);
+    setShowCreateModal(true);
+  };
+
+  const handleUpdateRoutine = (updatedRoutine: Routine) => {
+    const updated = routines.map(r => 
+      r.id === updatedRoutine.id ? updatedRoutine : r
+    );
+    saveRoutines(updated);
+    setShowCreateModal(false);
+    setEditingRoutine(null);
   };
 
   const handleDeleteRoutine = (routineId: string) => {
@@ -457,7 +494,10 @@ export default function RoutinesScreen() {
           <Text style={styles.headerTitle}>Routines</Text>
           <TouchableOpacity
             style={styles.createButton}
-            onPress={() => setShowCreateModal(true)}>
+            onPress={() => {
+              setEditingRoutine(null);
+              setShowCreateModal(true);
+            }}>
             <Text style={styles.createButtonText}>+ Create</Text>
           </TouchableOpacity>
         </View>
@@ -473,6 +513,7 @@ export default function RoutinesScreen() {
                 routine={routine}
                 onDelete={handleDeleteRoutine}
                 onUse={handleUseRoutine}
+                onEdit={handleEditRoutine}
               />
             ))}
           </View>
@@ -487,6 +528,7 @@ export default function RoutinesScreen() {
                 routine={routine}
                 onDelete={handleDeleteRoutine}
                 onUse={handleUseRoutine}
+                onEdit={handleEditRoutine}
               />
             ))}
           </View>
@@ -501,6 +543,7 @@ export default function RoutinesScreen() {
                 routine={routine}
                 onDelete={handleDeleteRoutine}
                 onUse={handleUseRoutine}
+                onEdit={handleEditRoutine}
               />
             ))}
           </View>
@@ -515,6 +558,7 @@ export default function RoutinesScreen() {
                 routine={routine}
                 onDelete={handleDeleteRoutine}
                 onUse={handleUseRoutine}
+                onEdit={handleEditRoutine}
               />
             ))}
           </View>
@@ -530,10 +574,14 @@ export default function RoutinesScreen() {
         )}
       </ScrollView>
 
-      <CreateRoutineModal
+      <CreateEditRoutineModal
         visible={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        onSave={handleCreateRoutine}
+        onClose={() => {
+          setShowCreateModal(false);
+          setEditingRoutine(null);
+        }}
+        onSave={editingRoutine ? handleUpdateRoutine : handleCreateRoutine}
+        editingRoutine={editingRoutine}
       />
     </SafeAreaView>
   );
@@ -624,6 +672,37 @@ const styles = StyleSheet.create({
   exerciseCount: {
     fontSize: 12,
     color: '#888',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  editButton: {
+    backgroundColor: '#4A9EFF',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  deleteButton: {
+    backgroundColor: '#FF3B30',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   useButton: {
     backgroundColor: '#0066CC',

@@ -1,5 +1,5 @@
 // app/(tabs)/index.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { Pressable } from 'react-native';
 import {
@@ -29,6 +29,8 @@ const SESSION_KEY = '@currentSessionId';
 type SessionData = {
   session_name?: string;
   notes?: string | null;
+  session_date?: string;
+  start_time?: string;
 };
 
 type SetRowProps = {
@@ -65,6 +67,16 @@ const getCurrentTime = () => {
     hour: '2-digit',
     minute: '2-digit',
   });
+};
+
+const formatElapsedTime = (totalSeconds: number) => {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return [hours, minutes, seconds]
+    .map((value) => value.toString().padStart(2, '0'))
+    .join(':');
 };
 
 // Set Row Component
@@ -256,11 +268,46 @@ export default function TodayScreen() {
   const [sessionNotes, setSessionNotes] = useState('');
   const [noteDraft, setNoteDraft] = useState('');
   const [savingNote, setSavingNote] = useState(false);
+  const [timerOrigin, setTimerOrigin] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Load session status and user ID on mount
   useEffect(() => {
     initializeScreen();
   }, []);
+
+  const clearTimerInterval = useCallback(() => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+  }, []);
+
+  const startTimer = useCallback((originMs: number) => {
+    clearTimerInterval();
+    setTimerOrigin(originMs);
+    setIsTimerRunning(true);
+
+    const updateElapsed = () => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - originMs) / 1000)));
+    };
+
+    updateElapsed();
+    timerIntervalRef.current = setInterval(updateElapsed, 1000);
+  }, [clearTimerInterval]);
+
+  const pauseTimer = useCallback(() => {
+    clearTimerInterval();
+    setIsTimerRunning(false);
+  }, [clearTimerInterval]);
+
+  useEffect(() => {
+    return () => {
+      clearTimerInterval();
+    };
+  }, [clearTimerInterval]);
 
   const initializeScreen = async () => {
     setLoading(true);
@@ -323,6 +370,17 @@ export default function TodayScreen() {
       setSessionData(session);
       setSessionNotes(session?.notes || '');
       setNoteDraft(session?.notes || '');
+
+      const sessionStart = session?.session_date && session?.start_time
+        ? new Date(`${session.session_date}T${session.start_time}`)
+        : null;
+      const initialTimerOrigin = sessionStart && !Number.isNaN(sessionStart.getTime())
+        ? sessionStart.getTime()
+        : Date.now();
+      clearTimerInterval();
+      setTimerOrigin(initialTimerOrigin);
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - initialTimerOrigin) / 1000)));
+      setIsTimerRunning(false);
 
       const transformedExercises: Exercise[] = sessionExercises.map(ex => ({
         id: ex.session_exercise_id,
@@ -479,6 +537,10 @@ export default function TodayScreen() {
       setSessionNotes('');
       setNoteDraft('');
       setShowNotesModal(false);
+      clearTimerInterval();
+      setTimerOrigin(null);
+      setElapsedSeconds(0);
+      setIsTimerRunning(false);
       
       await loadRoutines(userId);
     } catch (error) {
@@ -763,6 +825,10 @@ export default function TodayScreen() {
       setSessionNotes('');
       setNoteDraft('');
       setShowNotesModal(false);
+      clearTimerInterval();
+      setTimerOrigin(null);
+      setElapsedSeconds(0);
+      setIsTimerRunning(false);
       
       Alert.alert('Signed Out', 'You have been signed out successfully');
     } catch (error) {
@@ -889,12 +955,29 @@ export default function TodayScreen() {
     }
   };
 
+  const handleResetTimer = () => {
+    clearTimerInterval();
+    setTimerOrigin(Date.now());
+    setElapsedSeconds(0);
+    setIsTimerRunning(false);
+  };
+
+  const handleToggleTimer = () => {
+    if (isTimerRunning) {
+      pauseTimer();
+      return;
+    }
+
+    startTimer(Date.now() - (elapsedSeconds * 1000));
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled">
+        keyboardShouldPersistTaps="handled"
+        stickyHeaderIndices={[1]}>
         
         <LinearGradient
           colors={['#0066CC', '#4A9EFF']}
@@ -917,6 +1000,27 @@ export default function TodayScreen() {
             <View style={[styles.progressFill, { width: `${progress}%` }]} />
           </View>
         </LinearGradient>
+
+        <View style={styles.stickyTimerWrapper}>
+          <View style={styles.timerCard}>
+            <View>
+              <Text style={styles.timerLabel}>Workout Timer</Text>
+              <Text style={styles.timerValue}>{formatElapsedTime(elapsedSeconds)}</Text>
+            </View>
+            <View style={styles.timerActions}>
+              <TouchableOpacity
+                style={[styles.timerToggleButton, isTimerRunning ? styles.timerPauseButton : styles.timerStartButton]}
+                onPress={handleToggleTimer}>
+                <Text style={styles.timerToggleButtonText}>{isTimerRunning ? 'Pause' : 'Start'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.timerResetButton}
+                onPress={handleResetTimer}>
+                <Text style={styles.timerResetButtonText}>Reset</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
 
         <View style={styles.exercisesContainer}>
           <View style={styles.sectionHeader}>
@@ -1095,7 +1199,13 @@ const styles = StyleSheet.create({
   },
   exercisesContainer: {
     paddingHorizontal: 16,
-    paddingTop: 20,
+    paddingTop: 12,
+  },
+  stickyTimerWrapper: {
+    backgroundColor: '#000000',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 4,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -1553,6 +1663,66 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     lineHeight: 20,
+  },
+  timerCard: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+    padding: 14,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  timerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  timerLabel: {
+    color: '#888',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  timerValue: {
+    color: '#FFFFFF',
+    fontSize: 28,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  timerToggleButton: {
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    minWidth: 76,
+    alignItems: 'center',
+  },
+  timerStartButton: {
+    backgroundColor: '#0066CC',
+  },
+  timerPauseButton: {
+    backgroundColor: '#333333',
+  },
+  timerToggleButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  timerResetButton: {
+    backgroundColor: '#000000',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#333',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  timerResetButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
   noteModalOverlay: {
     flex: 1,

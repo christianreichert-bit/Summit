@@ -13,9 +13,11 @@ import {
   SafeAreaView,
   Alert,
   ActivityIndicator,
+  Modal,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Routine, Exercise, WorkoutLog } from '../../types';
+import { Routine, Exercise, WorkoutLog, Set as WorkoutSet } from '../../types';
 import exercisesData from '../../assets/data/exercises.json';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../backend/supabaseClient';
@@ -23,6 +25,27 @@ import ExerciseSearchModal from '../../components/ExerciseSearchModal';
 
 const STORAGE_KEY = '@workout_logs';
 const SESSION_KEY = '@currentSessionId';
+
+type SessionData = {
+  session_name?: string;
+  notes?: string | null;
+};
+
+type SetRowProps = {
+  set: WorkoutSet;
+  onUpdateSet: (setNumber: number, field: 'reps' | 'weight', value: string) => void;
+  onToggleComplete: (setNumber: number) => void;
+};
+
+type ExerciseCardProps = {
+  exercise: Exercise;
+  onRemove: (exerciseId: string) => void;
+  onUpdateSet: (setNumber: number, field: 'reps' | 'weight', value: string) => void;
+  onToggleSet: (exerciseId: string, setNumber: number) => void;
+  onAddSet: (exerciseId: string) => void;
+  onRemoveSet: (exerciseId: string) => void;
+  onReplace?: (exerciseId: string) => void;
+};
 
 // Get today's date formatted
 const getTodaysDate = () => {
@@ -45,7 +68,7 @@ const getCurrentTime = () => {
 };
 
 // Set Row Component
-const SetRow = ({ set, onUpdateSet, onToggleComplete }) => {
+const SetRow = ({ set, onUpdateSet, onToggleComplete }: SetRowProps) => {
   const [reps, setReps] = useState(set.reps);
   const [weight, setWeight] = useState(set.weight);
 
@@ -54,12 +77,12 @@ const SetRow = ({ set, onUpdateSet, onToggleComplete }) => {
     setWeight(set.weight);
   }, [set]);
 
-  const handleRepsChange = (text) => {
+  const handleRepsChange = (text: string) => {
     setReps(text);
     onUpdateSet(set.setNumber, 'reps', text);
   };
 
-  const handleWeightChange = (text) => {
+  const handleWeightChange = (text: string) => {
     setWeight(text);
     onUpdateSet(set.setNumber, 'weight', text);
   };
@@ -111,14 +134,14 @@ const ExerciseCard = ({
   onAddSet,
   onRemoveSet,
   onReplace = (_id: string) => {},
-}) => {
+}: ExerciseCardProps) => {
   const [expanded, setExpanded] = useState(true);
 
-  const handleUpdateSet = (setNumber, field, value) => {
+  const handleUpdateSet = (setNumber: number, field: 'reps' | 'weight', value: string) => {
     onUpdateSet(setNumber, field, value);
   };
 
-  const completedCount = exercise.sets.filter(s => s.completed).length;
+  const completedCount = exercise.sets.filter((s) => s.completed).length;
 
   return (
     <View style={styles.exerciseCard}>
@@ -204,12 +227,12 @@ const ExerciseCard = ({
           </View>
 
           {/* Table Rows */}
-          {exercise.sets.map((set) => (
+          {exercise.sets.map((set: WorkoutSet) => (
             <SetRow
               key={set.setNumber}
               set={set}
-              onUpdateSet={(setNum, field, value) => handleUpdateSet(setNum, field, value)}
-              onToggleComplete={(setNum) => onToggleSet(exercise.id, setNum)}
+              onUpdateSet={(setNum: number, field: 'reps' | 'weight', value: string) => handleUpdateSet(setNum, field, value)}
+              onToggleComplete={(setNum: number) => onToggleSet(exercise.id, setNum)}
             />
           ))}
         </View>
@@ -226,9 +249,13 @@ export default function TodayScreen() {
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [selectedRoutine, setSelectedRoutine] = useState<Routine | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
-  const [sessionData, setSessionData] = useState<any>(null);
+  const [sessionData, setSessionData] = useState<SessionData | null>(null);
   const [showExerciseModal, setShowExerciseModal] = useState(false);
   const [replaceExerciseId, setReplaceExerciseId] = useState<string | null>(null);
+  const [showNotesModal, setShowNotesModal] = useState(false);
+  const [sessionNotes, setSessionNotes] = useState('');
+  const [noteDraft, setNoteDraft] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
 
   // Load session status and user ID on mount
   useEffect(() => {
@@ -294,6 +321,8 @@ export default function TodayScreen() {
       if (exercisesError) throw exercisesError;
 
       setSessionData(session);
+      setSessionNotes(session?.notes || '');
+      setNoteDraft(session?.notes || '');
 
       const transformedExercises: Exercise[] = sessionExercises.map(ex => ({
         id: ex.session_exercise_id,
@@ -447,6 +476,9 @@ export default function TodayScreen() {
       setExercises([]);
       setSelectedRoutine(null);
       setSessionData(null);
+      setSessionNotes('');
+      setNoteDraft('');
+      setShowNotesModal(false);
       
       await loadRoutines(userId);
     } catch (error) {
@@ -727,6 +759,10 @@ export default function TodayScreen() {
       setExercises([]);
       setRoutines([]);
       setSelectedRoutine(null);
+      setSessionData(null);
+      setSessionNotes('');
+      setNoteDraft('');
+      setShowNotesModal(false);
       
       Alert.alert('Signed Out', 'You have been signed out successfully');
     } catch (error) {
@@ -823,6 +859,36 @@ export default function TodayScreen() {
   const totalSets = exercises.reduce((acc, ex) => acc + ex.sets.length, 0);
   const progress = totalSets > 0 ? (completedSets / totalSets) * 100 : 0;
 
+  const openNotesModal = () => {
+    setNoteDraft(sessionNotes);
+    setShowNotesModal(true);
+  };
+
+  const handleSaveNotes = async () => {
+    if (!currentSessionId) return;
+
+    const normalizedNotes = noteDraft.trim();
+
+    setSavingNote(true);
+    try {
+      const { error } = await supabase
+        .from('workout_sessions')
+        .update({ notes: normalizedNotes || null })
+        .eq('session_id', currentSessionId);
+
+      if (error) throw error;
+
+      setSessionNotes(normalizedNotes);
+      setSessionData((prev: SessionData | null) => (prev ? { ...prev, notes: normalizedNotes || null } : prev));
+      setShowNotesModal(false);
+    } catch (error: any) {
+      console.error('Failed to save notes:', error);
+      Alert.alert('Error', error.message || 'Failed to save workout note');
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -855,11 +921,20 @@ export default function TodayScreen() {
         <View style={styles.exercisesContainer}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>{sessionData?.session_name || 'Workout'}</Text>
-            <TouchableOpacity
-              style={styles.endSessionButton}
-              onPress={handleEndSession}>
-              <Text style={styles.endSessionButtonText}>End Workout</Text>
-            </TouchableOpacity>
+            <View style={styles.headerButtons}>
+              <TouchableOpacity
+                style={styles.noteButton}
+                onPress={openNotesModal}>
+                <Text style={styles.noteButtonText}>
+                  {sessionNotes ? 'Edit Note' : 'Add Note'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.endSessionButton}
+                onPress={handleEndSession}>
+                <Text style={styles.endSessionButtonText}>End Workout</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {exercises.map((exercise) => (
@@ -867,7 +942,7 @@ export default function TodayScreen() {
               key={exercise.id}
               exercise={exercise}
               onRemove={handleRemoveExercise}
-              onUpdateSet={(setNum, field, value) =>
+              onUpdateSet={(setNum: number, field: 'reps' | 'weight', value: string) =>
                 handleUpdateSet(exercise.id, setNum, field, value)
               }
               onToggleSet={handleToggleSet}
@@ -906,6 +981,62 @@ export default function TodayScreen() {
         }}
         onSelect={handleExerciseSelected}
       />
+
+      <Modal
+        visible={showNotesModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowNotesModal(false)}>
+        <KeyboardAvoidingView
+          style={styles.noteModalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.noteModalCard}>
+            <View style={styles.noteModalHeader}>
+              <Text style={styles.noteModalTitle}>Workout Note</Text>
+              <TouchableOpacity
+                onPress={() => setShowNotesModal(false)}
+                disabled={savingNote}>
+                <Text style={styles.noteModalClose}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.noteModalHint}>
+              Save notes anytime during your workout.
+            </Text>
+
+            <TextInput
+              style={styles.noteInput}
+              value={noteDraft}
+              onChangeText={setNoteDraft}
+              placeholder="Add your notes here..."
+              placeholderTextColor="#666"
+              multiline
+              textAlignVertical="top"
+              editable={!savingNote}
+            />
+
+            <View style={styles.noteModalActions}>
+              <TouchableOpacity
+                style={styles.noteSecondaryButton}
+                onPress={() => setNoteDraft('')}
+                disabled={savingNote}>
+                <Text style={styles.noteSecondaryButtonText}>Clear</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.notePrimaryButton, savingNote && styles.notePrimaryButtonDisabled]}
+                onPress={handleSaveNotes}
+                disabled={savingNote}>
+                {savingNote ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.notePrimaryButtonText}>Save Note</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -980,6 +1111,7 @@ const styles = StyleSheet.create({
   headerButtons: {
     flexDirection: 'row',
     gap: 12,
+    alignItems: 'center',
   },
   iconButton: {
     backgroundColor: '#1A1A1A',
@@ -1388,5 +1520,117 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
+  },
+  noteButton: {
+    backgroundColor: '#1A1A1A',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  noteButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  notePreviewCard: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+    padding: 14,
+    marginBottom: 12,
+  },
+  notePreviewLabel: {
+    color: '#0066CC',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  notePreviewText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  noteModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  noteModalCard: {
+    backgroundColor: '#121212',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#333',
+    padding: 20,
+  },
+  noteModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  noteModalTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  noteModalClose: {
+    color: '#888',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  noteModalHint: {
+    color: '#888',
+    fontSize: 14,
+    marginBottom: 16,
+  },
+  noteInput: {
+    minHeight: 140,
+    backgroundColor: '#000000',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+    color: '#FFFFFF',
+    fontSize: 15,
+    padding: 14,
+    marginBottom: 16,
+  },
+  noteModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  noteSecondaryButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#1A1A1A',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  noteSecondaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  notePrimaryButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#0066CC',
+    minWidth: 108,
+    alignItems: 'center',
+  },
+  notePrimaryButtonDisabled: {
+    opacity: 0.7,
+  },
+  notePrimaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

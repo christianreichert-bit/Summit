@@ -1,5 +1,3 @@
-import { useState } from "react";
-
 type User = {
   user_id: string;
   username: string;
@@ -71,6 +69,13 @@ let localWorkoutSessions: WorkoutSession[] = [];
 let localSessionExercises: SessionExercise[] = [];
 let localSessionExerciseSets: SessionExerciseSet[] = [];
 let localSession: { user: { id: string; email: string } } | null = null;
+const authListeners: ((event: string, session: any) => void)[] = [];
+
+function emitAuthStateChange(event: string) {
+  for (const listener of authListeners) {
+    listener(event, localSession);
+  }
+}
 
 type PersonalRecord = {
   pr_id: number;
@@ -113,6 +118,7 @@ export const localDb = {
     };
     localUsers.push(user);
     localSession = { user: { id: userId, email } };
+    emitAuthStateChange("SIGNED_IN");
     return { data: { user: { id: userId } }, error: null };
   },
 
@@ -122,11 +128,13 @@ export const localDb = {
       return { data: null, error: { message: "User not found" } };
     }
     localSession = { user: { id: user.user_id, email } };
+    emitAuthStateChange("SIGNED_IN");
     return { data: { user: { id: user.user_id } }, error: null };
   },
 
   signOut: async () => {
     localSession = null;
+    emitAuthStateChange("SIGNED_OUT");
   },
 
   getSession: async () => {
@@ -154,10 +162,16 @@ export const localDb = {
   },
 
   onAuthStateChange: (callback: (event: string, session: any) => void) => {
+    authListeners.push(callback);
     return {
       data: {
         subscription: {
-          unsubscribe: () => {},
+          unsubscribe: () => {
+            const index = authListeners.indexOf(callback);
+            if (index !== -1) {
+              authListeners.splice(index, 1);
+            }
+          },
         },
       },
     };

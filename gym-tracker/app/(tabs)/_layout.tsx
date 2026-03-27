@@ -55,7 +55,6 @@ export default function TabsLayout() {
           ),
         }}
       />
-      <Tabs.Screen name="auth" options={{ href: null }} /> 
     </Tabs>
   );
 }

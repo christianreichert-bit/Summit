@@ -30,11 +30,11 @@ const RoutineCard = ({ routine, onDelete, onUse, onEdit }) => {
 
   return (
     <View style={styles.routineCard}>
-      <TouchableOpacity
-        style={styles.routineHeader}
-        onPress={() => setExpanded(!expanded)}
-        activeOpacity={0.7}>
-        <View style={styles.routineHeaderLeft}>
+      <View style={styles.routineHeader}>
+        <TouchableOpacity
+          style={styles.routineHeaderLeft}
+          onPress={() => setExpanded(!expanded)}
+          activeOpacity={0.7}>
           <Text style={styles.chevron}>{expanded ? '▼' : '▶'}</Text>
           <View>
             <Text style={styles.routineName}>{routine.name}</Text>
@@ -42,7 +42,7 @@ const RoutineCard = ({ routine, onDelete, onUse, onEdit }) => {
               {routine.day === 'Custom' ? routine.customDayName : routine.day}
             </Text>
           </View>
-        </View>
+        </TouchableOpacity>
         <View style={styles.routineHeaderRight}>
           <Text style={styles.exerciseCount}>{routine.exercises.length} exercises</Text>
           <View style={styles.actionButtons}>
@@ -57,7 +57,7 @@ const RoutineCard = ({ routine, onDelete, onUse, onEdit }) => {
             </TouchableOpacity>
           </View>
         </View>
-      </TouchableOpacity>
+      </View>
 
       {expanded && (
         <View style={styles.routineExercises}>

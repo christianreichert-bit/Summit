@@ -18,8 +18,8 @@ function RootNav() {
     });
 
     const result = db.onAuthStateChange(
-      (_event: string, session: any) => {
-        setSession(session);
+      (_event: string, nextSession: any) => {
+        setSession(nextSession);
       }
     );
 
@@ -37,12 +37,15 @@ function RootNav() {
 
     const inAuthScreen = segments[0] === "auth";
 
+    if (!session && !inAuthScreen) {
+      router.replace("/auth");
+      return;
+    }
+
     if (session && inAuthScreen) {
       router.replace("/(tabs)");
-    } else if (!session && !inAuthScreen) {
-      router.replace("/auth");
     }
-  }, [session, loading, segments]);
+  }, [loading, router, segments, session]);
 
   if (loading) return null;
 
@@ -57,10 +60,8 @@ function RootNav() {
       >
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="auth" />
-        <Stack.Screen name="workout" options={{ animation: "slide_from_bottom", animationDuration: 280 }} />
         <Stack.Screen name="settings" options={{ animation: "slide_from_bottom", animationDuration: 280 }} />
-        <Stack.Screen name="exercise-detail/[exerciseId]" options={{ animation: "slide_from_right", animationDuration: 280 }} />
-        <Stack.Screen name="index" />
+        <Stack.Screen name="test" options={{ animation: "slide_from_right", animationDuration: 280 }} />
       </Stack>
     </View>
   );

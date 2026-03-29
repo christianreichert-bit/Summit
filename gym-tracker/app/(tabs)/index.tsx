@@ -1,7 +1,6 @@
 // app/(tabs)/index.tsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'expo-router';
-import { Pressable } from 'react-native';
 import {
   StyleSheet,
   View,
@@ -15,6 +14,8 @@ import {
   ActivityIndicator,
   Modal,
   KeyboardAvoidingView,
+  PanResponder,
+  Dimensions
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Routine, Exercise, WorkoutLog, Set as WorkoutSet } from '../../types';
@@ -37,10 +38,20 @@ type SetRowProps = {
   set: WorkoutSet;
   onUpdateSet: (setNumber: number, field: 'reps' | 'weight', value: string) => void;
   onToggleComplete: (setNumber: number) => void;
+  isActive?: boolean;
+  activeField?: 'reps' | 'weight';
+  repsRef?: (ref: TextInput | null) => void;
+  weightRef?: (ref: TextInput | null) => void;
 };
 
 type ExerciseCardProps = {
   exercise: Exercise;
+  isFocused: boolean;
+  onFocus: (exerciseId: string) => void;
+  onSwipeVertical: (direction: 'up' | 'down' | 'left' | 'right', exerciseId: string) => void;
+  onNavigateExercise: (exerciseId: string, direction: 'prev' | 'next') => void;
+  onCardLayout: (exerciseId: string, y: number, height: number) => void;
+  focusInitialSet?: 'first' | 'last';
   onRemove: (exerciseId: string) => void;
   onUpdateSet: (setNumber: number, field: 'reps' | 'weight', value: string) => void;
   onToggleSet: (exerciseId: string, setNumber: number) => void;
@@ -80,7 +91,7 @@ const formatElapsedTime = (totalSeconds: number) => {
 };
 
 // Set Row Component
-const SetRow = ({ set, onUpdateSet, onToggleComplete }: SetRowProps) => {
+const SetRow = ({ set, onUpdateSet, onToggleComplete, isActive, activeField, repsRef, weightRef }: SetRowProps) => {
   const [reps, setReps] = useState(set.reps);
   const [weight, setWeight] = useState(set.weight);
 
@@ -111,7 +122,8 @@ const SetRow = ({ set, onUpdateSet, onToggleComplete }: SetRowProps) => {
       </View>
       <View style={styles.setInputCell}>
         <TextInput
-          style={[styles.setInput, set.completed && styles.inputCompleted]}
+          ref={repsRef}
+          style={[styles.setInput, set.completed && styles.inputCompleted, isActive && activeField === 'reps' && styles.activeInput]}
           value={reps}
           onChangeText={handleRepsChange}
           keyboardType="numeric"
@@ -123,7 +135,8 @@ const SetRow = ({ set, onUpdateSet, onToggleComplete }: SetRowProps) => {
       </View>
       <View style={styles.setInputCell}>
         <TextInput
-          style={[styles.setInput, set.completed && styles.inputCompleted]}
+          ref={weightRef}
+          style={[styles.setInput, set.completed && styles.inputCompleted, isActive && activeField === 'weight' && styles.activeInput]}
           value={weight}
           onChangeText={handleWeightChange}
           keyboardType="numeric"
@@ -140,14 +153,107 @@ const SetRow = ({ set, onUpdateSet, onToggleComplete }: SetRowProps) => {
 // Exercise Card Component
 const ExerciseCard = ({
   exercise,
+  isFocused,
+  onFocus,
+  onSwipeVertical,
+  onNavigateExercise,
   onRemove,
   onUpdateSet,
   onToggleSet,
   onAddSet,
   onRemoveSet,
   onReplace = (_id: string) => {},
+  onCardLayout,
+  focusInitialSet = 'first',
 }: ExerciseCardProps) => {
   const [expanded, setExpanded] = useState(true);
+  const [activeSetIndex, setActiveSetIndex] = useState(0);
+  const [activeField, setActiveField] = useState<'reps' | 'weight'>('reps');
+  const inputRefs = useRef<{ [key: string]: TextInput | null }>({});
+  const isFocusedRef = useRef(isFocused);
+  const activeSetIndexRef = useRef(0);
+  const swipeHandlerRef = useRef<(dir: 'up' | 'down' | 'left' | 'right') => void>(() => {});
+
+  useEffect(() => {
+    isFocusedRef.current = isFocused;
+  }, [isFocused]);
+
+  useEffect(() => {
+    activeSetIndexRef.current = activeSetIndex;
+  }, [activeSetIndex]);
+
+  // Keep swipe handler up to date with latest state
+  useEffect(() => {
+    swipeHandlerRef.current = (dir: 'up' | 'down' | 'left' | 'right') => {
+      onSwipeVertical(dir, exercise.id);
+      if (dir === 'right') {
+        setActiveField('weight');
+      } else if (dir === 'left') {
+        setActiveField('reps');
+      } else if (dir === 'up') {
+        if (activeSetIndexRef.current === 0) {
+          onNavigateExercise(exercise.id, 'prev');
+        } else {
+          setActiveSetIndex((i) => i - 1);
+        }
+      } else if (dir === 'down') {
+        if (activeSetIndexRef.current === exercise.sets.length - 1) {
+          onNavigateExercise(exercise.id, 'next');
+        } else {
+          setActiveSetIndex((i) => i + 1);
+        }
+      }
+    };
+  });
+
+  // Reset to first or last set when card gains focus
+  useEffect(() => {
+    if (isFocused) {
+      const startIdx = focusInitialSet === 'last' ? Math.max(0, exercise.sets.length - 1) : 0;
+      setActiveSetIndex(startIdx);
+      setActiveField('reps');
+    }
+  }, [isFocused]);
+
+  // Auto-focus the correct TextInput whenever active set/field changes
+  useEffect(() => {
+    if (!isFocused) return;
+    const activeSet = exercise.sets[activeSetIndex];
+    if (!activeSet) return;
+    const key = `${activeSet.setNumber}_${activeField}`;
+    inputRefs.current[key]?.focus();
+  }, [activeSetIndex, activeField, isFocused, exercise.sets]);
+
+  const cardPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponderCapture: (_evt, gestureState) => {
+        if (!isFocusedRef.current) return false;
+        const absDx = Math.abs(gestureState.dx);
+        const absDy = Math.abs(gestureState.dy);
+        return absDx > 12 || absDy > 12;
+      },
+      onMoveShouldSetPanResponder: (_evt, gestureState) => {
+        if (!isFocusedRef.current) return false;
+        const absDx = Math.abs(gestureState.dx);
+        const absDy = Math.abs(gestureState.dy);
+        return absDx > 12 || absDy > 12;
+      },
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderRelease: (_evt, gestureState) => {
+        if (!isFocusedRef.current) return;
+        const { dx, dy } = gestureState;
+        const absDx = Math.abs(dx);
+        const absDy = Math.abs(dy);
+        if (absDx < 12 && absDy < 12) return;
+        if (absDx > absDy) {
+          swipeHandlerRef.current(dx > 0 ? 'right' : 'left');
+          return;
+        }
+        swipeHandlerRef.current(dy > 0 ? 'down' : 'up');
+      },
+    })
+  ).current;
 
   const handleUpdateSet = (setNumber: number, field: 'reps' | 'weight', value: string) => {
     onUpdateSet(setNumber, field, value);
@@ -156,11 +262,18 @@ const ExerciseCard = ({
   const completedCount = exercise.sets.filter((s) => s.completed).length;
 
   return (
-    <View style={styles.exerciseCard}>
+    <View
+      style={[styles.exerciseCard, isFocused && styles.focusedExerciseCard]}
+      onTouchStart={() => onFocus(exercise.id)}
+      onLayout={(e) => onCardLayout(exercise.id, e.nativeEvent.layout.y, e.nativeEvent.layout.height)}
+      {...cardPanResponder.panHandlers}>
       {/* Exercise Header */}
       <TouchableOpacity
         style={styles.exerciseHeader}
-        onPress={() => setExpanded(!expanded)}
+        onPress={() => {
+          onFocus(exercise.id);
+          setExpanded(!expanded);
+        }}
         activeOpacity={0.7}>
         <View style={styles.exerciseHeaderLeft}>
           <Text style={styles.chevron}>{expanded ? '▼' : '▶'}</Text>
@@ -239,10 +352,14 @@ const ExerciseCard = ({
           </View>
 
           {/* Table Rows */}
-          {exercise.sets.map((set: WorkoutSet) => (
+          {exercise.sets.map((set: WorkoutSet, idx: number) => (
             <SetRow
               key={set.setNumber}
               set={set}
+              isActive={isFocused && idx === activeSetIndex}
+              activeField={activeField}
+              repsRef={(ref) => { inputRefs.current[`${set.setNumber}_reps`] = ref; }}
+              weightRef={(ref) => { inputRefs.current[`${set.setNumber}_weight`] = ref; }}
               onUpdateSet={(setNum: number, field: 'reps' | 'weight', value: string) => handleUpdateSet(setNum, field, value)}
               onToggleComplete={(setNum: number) => onToggleSet(exercise.id, setNum)}
             />
@@ -271,7 +388,12 @@ export default function TodayScreen() {
   const [timerOrigin, setTimerOrigin] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [focusedExerciseId, setFocusedExerciseId] = useState<string | null>(null);
+  const [focusedInitialSet, setFocusedInitialSet] = useState<'first' | 'last'>('first');
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const exercisesContainerYRef = useRef(0);
+  const cardLayoutMapRef = useRef<{ [id: string]: { y: number; height: number } }>({});
 
   // Load session status and user ID on mount
   useEffect(() => {
@@ -971,9 +1093,39 @@ export default function TodayScreen() {
     startTimer(Date.now() - (elapsedSeconds * 1000));
   };
 
+  const handleFocusExerciseCard = (exerciseId: string, initialSet: 'first' | 'last' = 'first') => {
+    setFocusedInitialSet(initialSet);
+    setFocusedExerciseId(exerciseId);
+    const layout = cardLayoutMapRef.current[exerciseId];
+    if (layout) {
+      const windowHeight = Dimensions.get('window').height;
+      const targetY = exercisesContainerYRef.current + layout.y - windowHeight / 2 + layout.height / 2;
+      scrollViewRef.current?.scrollTo({ y: Math.max(0, targetY), animated: true });
+    }
+  };
+
+  const handleNavigateExercise = (exerciseId: string, direction: 'prev' | 'next') => {
+    const idx = exercises.findIndex((ex) => ex.id === exerciseId);
+    if (direction === 'next' && idx < exercises.length - 1) {
+      handleFocusExerciseCard(exercises[idx + 1].id, 'first');
+    } else if (direction === 'prev' && idx > 0) {
+      handleFocusExerciseCard(exercises[idx - 1].id, 'last');
+    }
+  };
+
+  const handleCardLayout = (exerciseId: string, y: number, height: number) => {
+    cardLayoutMapRef.current[exerciseId] = { y, height };
+  };
+
+  const handleFocusedCardSwipeVertical = (direction: 'up' | 'down' | 'left' | 'right') => {
+    console.log(direction);
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
+        ref={scrollViewRef}
+        scrollEnabled={!focusedExerciseId}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -1022,7 +1174,9 @@ export default function TodayScreen() {
           </View>
         </View>
 
-        <View style={styles.exercisesContainer}>
+        <View
+          style={styles.exercisesContainer}
+          onLayout={(e) => { exercisesContainerYRef.current = e.nativeEvent.layout.y; }}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>{sessionData?.session_name || 'Workout'}</Text>
             <View style={styles.headerButtons}>
@@ -1038,6 +1192,13 @@ export default function TodayScreen() {
                 onPress={handleEndSession}>
                 <Text style={styles.endSessionButtonText}>End Workout</Text>
               </TouchableOpacity>
+              {focusedExerciseId && (
+                <TouchableOpacity
+                  style={styles.unfocusButton}
+                  onPress={() => setFocusedExerciseId(null)}>
+                  <Text style={styles.unfocusButtonText}>Unfocus</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
 
@@ -1045,6 +1206,12 @@ export default function TodayScreen() {
             <ExerciseCard
               key={exercise.id}
               exercise={exercise}
+              isFocused={focusedExerciseId === exercise.id}
+              focusInitialSet={focusedExerciseId === exercise.id ? focusedInitialSet : 'first'}
+              onFocus={handleFocusExerciseCard}
+              onSwipeVertical={handleFocusedCardSwipeVertical}
+              onNavigateExercise={handleNavigateExercise}
+              onCardLayout={handleCardLayout}
               onRemove={handleRemoveExercise}
               onUpdateSet={(setNum: number, field: 'reps' | 'weight', value: string) =>
                 handleUpdateSet(exercise.id, setNum, field, value)
@@ -1192,6 +1359,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.3)',
     borderRadius: 2,
     overflow: 'hidden',
+  },
+  focusedExerciseCard: {
+    borderWidth: 2,
+    borderColor: '#0066CC',
+  },
+  activeInput: {
+    borderColor: '#0066CC',
+    borderWidth: 2,
   },
   progressFill: {
     height: '100%',
@@ -1642,6 +1817,17 @@ const styles = StyleSheet.create({
   noteButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
+    fontWeight: '600',
+  },
+  unfocusButton: {
+    backgroundColor: '#333333',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  unfocusButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '600',
   },
   notePreviewCard: {

@@ -450,21 +450,24 @@ export default function RoutinesScreen() {
   };
 
   const handleDeleteRoutine = (routineId: string) => {
-    Alert.alert(
-      'Delete Routine',
-      'Are you sure you want to delete this routine?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            const updated = routines.filter(r => r.id !== routineId);
-            saveRoutines(updated);
-          },
-        },
-      ]
-    );
+    const performDelete = () => {
+      const updated = routines.filter((r) => r.id !== routineId);
+      saveRoutines(updated);
+    };
+
+    // react-native-web's Alert.alert with multiple buttons is unreliable: the dialog
+    // may not show or button onPress callbacks may never run. Native Alert works fine.
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm('Delete this routine?')) {
+        performDelete();
+      }
+      return;
+    }
+
+    Alert.alert('Delete Routine', 'Are you sure you want to delete this routine?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: performDelete },
+    ]);
   };
 
   const handleUseRoutine = (routine: Routine) => {

@@ -1,4 +1,10 @@
 // types/index.ts
+export interface RoutineSet {
+  setNumber: number;
+  reps: string;
+  weight: string;
+}
+
 export interface Set {
   setNumber: number;
   reps: string;
@@ -21,6 +27,7 @@ export interface RoutineExercise {
   muscleGroup: string;
   defaultSetCount: number;
   notes?: string;
+  sets?: RoutineSet[];  
 }
 
 export interface Routine {

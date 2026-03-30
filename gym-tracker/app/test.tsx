@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
-import { db, isOnline } from "./backend/db";
+import { supabase } from "./backend/supabaseClient";
 import exercisesData from "../assets/data/exercises.json";
 
 export default function TestScreen() {

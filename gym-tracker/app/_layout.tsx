@@ -1,29 +1,35 @@
-// app/_layout.tsx
 import { useEffect, useState } from "react";
+import { View } from "react-native";
 import { Stack, useRouter, useSegments } from "expo-router";
-import { Session } from "@supabase/supabase-js";
-import { supabase } from "../lib/supabaseClient";
-import { Pressable, Text } from "react-native";
+import { db } from "./backend/db";
+import { ThemeProvider, useTheme } from "./theme/ThemeContext";
 
-export default function RootLayout() {
-  const [session, setSession] = useState<Session | null>(null);
+function RootNav() {
+  const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const segments = useSegments();
+  const { colors } = useTheme();
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
+    db.getSession().then((result: any) => {
+      setSession(result?.data?.session ?? null);
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session);
+    const result = db.onAuthStateChange(
+      (_event: string, nextSession: any) => {
+        setSession(nextSession);
       }
     );
 
-    return () => subscription.unsubscribe();
+    const subscription = result?.data?.subscription;
+
+    return () => {
+      if (subscription?.unsubscribe) {
+        subscription.unsubscribe();
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -33,47 +39,38 @@ export default function RootLayout() {
 
     if (!session && !inAuthScreen) {
       router.replace("/auth");
+      return;
     }
-  }, [session, loading, segments]);
+
+    if (session && inAuthScreen) {
+      router.replace("/(tabs)");
+    }
+  }, [loading, router, segments, session]);
 
   if (loading) return null;
 
   return (
-    <Stack
-      screenOptions={{
-        headerStyle: {
-          backgroundColor: '#FF6B00',
-        },
-        headerTintColor: '#fff',
-        headerTitleStyle: {
-          fontWeight: 'bold',
-        },
-      }}
-    >
-      <Stack.Screen 
-        name="index" 
-        options={{ 
-          title: "Today's Workout",
-          headerRight: () => (
-            <Pressable onPress={() => router.push("/routines")}>
-              <Text style={{ color: '#fff', marginRight: 16, fontSize: 16 }}>Routines</Text>
-            </Pressable>
-          ),
-        }} 
-      />
-      <Stack.Screen 
-        name="routines" 
-        options={{ 
-          title: "My Routines",
-          headerLeft: () => (
-            <Pressable onPress={() => router.back()}>
-              <Text style={{ color: '#fff', marginLeft: 16, fontSize: 16 }}>Back</Text>
-            </Pressable>
-          ),
-        }} 
-      />
-      <Stack.Screen name="auth" options={{ headerShown: false }} />
-      <Stack.Screen name="test" options={{ title: "Supabase Test" }} />
-    </Stack>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+          animation: "none",
+        }}
+      >
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="auth" />
+        <Stack.Screen name="settings" options={{ animation: "slide_from_bottom", animationDuration: 280 }} />
+        <Stack.Screen name="test" options={{ animation: "slide_from_right", animationDuration: 280 }} />
+      </Stack>
+    </View>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <ThemeProvider>
+      <RootNav />
+    </ThemeProvider>
   );
 }

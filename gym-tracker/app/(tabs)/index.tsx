@@ -1,6 +1,6 @@
 // app/(tabs)/index.tsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   StyleSheet,
   View,
@@ -372,6 +372,7 @@ const ExerciseCard = ({
 
 export default function TodayScreen() {
   const router = useRouter();
+  const { selectedRoutine: selectedRoutineParam } = useLocalSearchParams<{ selectedRoutine?: string | string[] }>();
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [exercises, setExercises] = useState<Exercise[]>([]);
@@ -395,10 +396,47 @@ export default function TodayScreen() {
   const exercisesContainerYRef = useRef(0);
   const cardLayoutMapRef = useRef<{ [id: string]: { y: number; height: number } }>({});
 
+  const buildPresetSetsFromRoutine = (routineExercise: Routine['exercises'][number]) => {
+    if (routineExercise.sets && routineExercise.sets.length > 0) {
+      return routineExercise.sets.map((set, index) => ({
+        setNumber: set.setNumber || index + 1,
+        reps: set.reps || '',
+        weight: set.weight || '',
+      }));
+    }
+
+    const setCount = routineExercise.defaultSetCount || 3;
+    return Array.from({ length: setCount }, (_, i) => ({
+      setNumber: i + 1,
+      reps: '',
+      weight: '',
+    }));
+  };
+
   // Load session status and user ID on mount
   useEffect(() => {
     initializeScreen();
   }, []);
+
+  useEffect(() => {
+    if (!selectedRoutineParam) return;
+
+    const rawParam = Array.isArray(selectedRoutineParam)
+      ? selectedRoutineParam[0]
+      : selectedRoutineParam;
+
+    if (!rawParam) return;
+
+    try {
+      const parsedRoutine = JSON.parse(rawParam) as Routine;
+      if (!parsedRoutine?.id) return;
+
+      const routineFromStorage = routines.find((routine) => routine.id === parsedRoutine.id);
+      setSelectedRoutine(routineFromStorage || parsedRoutine);
+    } catch (error) {
+      console.error('Failed to parse selected routine param:', error);
+    }
+  }, [selectedRoutineParam, routines]);
 
   const clearTimerInterval = useCallback(() => {
     if (timerIntervalRef.current) {
@@ -435,9 +473,10 @@ export default function TodayScreen() {
     setLoading(true);
     try {
       const storedUserId = await AsyncStorage.getItem('userId');
+      console.log('Reading userid on index.tsx:', storedUserId);
       setUserId(storedUserId);
 
-      const sessionId = await AsyncStorage.getItem(SESSION_KEY);
+      const sessionId: string | null = await AsyncStorage.getItem(SESSION_KEY);
       
       if (sessionId) {
         await loadSession(sessionId);
@@ -590,27 +629,16 @@ export default function TodayScreen() {
       // Create sets using saved data if available
       const allSets = createdExercises.flatMap((ex, index) => {
         const routineEx = selectedRoutine.exercises[index];
-        
-        if (routineEx.sets && routineEx.sets.length > 0) {
-          return routineEx.sets.map(set => ({
-            session_exercise_id: ex.session_exercise_id,
-            set_number: set.setNumber,
-            weight: set.weight ? parseFloat(set.weight) : null,
-            reps: set.reps ? parseInt(set.reps) : null,
-            is_warmup: false,
-            completed: false,
-          }));
-        } else {
-          const setCount = routineEx?.defaultSetCount || 3;
-          return Array.from({ length: setCount }, (_, i) => ({
-            session_exercise_id: ex.session_exercise_id,
-            set_number: i + 1,
-            weight: null,
-            reps: null,
-            is_warmup: false,
-            completed: false,
-          }));
-        }
+        const presetSets = buildPresetSetsFromRoutine(routineEx);
+
+        return presetSets.map((set) => ({
+          session_exercise_id: ex.session_exercise_id,
+          set_number: set.setNumber,
+          weight: set.weight ? parseFloat(set.weight) : null,
+          reps: set.reps ? parseInt(set.reps) : null,
+          is_warmup: false,
+          completed: false,
+        }));
       });
 
       console.log('Creating sets:', allSets);
@@ -628,8 +656,46 @@ export default function TodayScreen() {
 
       await AsyncStorage.setItem(SESSION_KEY, session.session_id);
       setCurrentSessionId(session.session_id);
-      
-      await loadSession(session.session_id);
+
+      // Build exercise state directly from routine data so reps/weight are preloaded
+      const transformedExercises: Exercise[] = createdExercises.map((ex, index) => {
+        const routineEx = selectedRoutine.exercises[index];
+        const sets = buildPresetSetsFromRoutine(routineEx).map((set) => ({
+          ...set,
+          completed: false,
+        }));
+
+        return {
+          id: ex.session_exercise_id,
+          name: ex.exercise_name,
+          muscleGroup: routineEx?.muscleGroup || 'General',
+          setCount: sets.length.toString(),
+          sets,
+        };
+      });
+
+      setExercises(transformedExercises);
+      setSessionData({
+        session_name: session.session_name,
+        session_date: session.session_date,
+        start_time: session.start_time,
+      });
+      setSessionNotes('');
+      setNoteDraft('');
+
+      const sessionStart =
+        session.session_date && session.start_time
+          ? new Date(`${session.session_date}T${session.start_time}`)
+          : null;
+      const initialTimerOrigin =
+        sessionStart && !Number.isNaN(sessionStart.getTime())
+          ? sessionStart.getTime()
+          : Date.now();
+      clearTimerInterval();
+      setTimerOrigin(initialTimerOrigin);
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - initialTimerOrigin) / 1000)));
+      setIsTimerRunning(false);
+
       console.log('Session loaded successfully');
     } catch (error: any) {
       console.error('Failed to start session:', error);

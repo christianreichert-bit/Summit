@@ -62,6 +62,7 @@ function RootNav() {
       >
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="auth" />
+        <Stack.Screen name="reset-password" />
         <Stack.Screen name="settings" options={{ animation: "slide_from_bottom", animationDuration: 280 }} />
         <Stack.Screen name="test" options={{ animation: "slide_from_right", animationDuration: 280 }} />
       </Stack>

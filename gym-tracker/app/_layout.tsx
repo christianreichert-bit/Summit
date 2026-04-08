@@ -36,8 +36,10 @@ function RootNav() {
     if (loading) return;
 
     const inAuthScreen = segments[0] === "auth";
+    const inResetPasswordScreen = segments[0] === "reset-password";
+    const inPublicRoute = inAuthScreen || inResetPasswordScreen;
 
-    if (!session && !inAuthScreen) {
+    if (!session && !inPublicRoute) {
       router.replace("/auth");
       return;
     }

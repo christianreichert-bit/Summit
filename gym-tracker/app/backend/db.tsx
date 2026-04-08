@@ -34,6 +34,13 @@ export const db = {
     return localDb.signIn(email, password);
   },
 
+  requestPasswordReset: async (email: string, redirectTo?: string) => {
+    if (isOnline) {
+      return supabase.auth.resetPasswordForEmail(email, redirectTo ? { redirectTo } : undefined);
+    }
+    return localDb.requestPasswordReset(email);
+  },
+
   signOut: async () => {
     if (isOnline) {
       await supabase.auth.signOut();

@@ -132,6 +132,13 @@ export const localDb = {
     return { data: { user: { id: user.user_id } }, error: null };
   },
 
+  requestPasswordReset: async (_email: string) => {
+    return {
+      data: null,
+      error: { message: "Password reset email requires an internet connection." },
+    };
+  },
+
   signOut: async () => {
     localSession = null;
     emitAuthStateChange("SIGNED_OUT");

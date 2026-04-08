@@ -3,10 +3,10 @@
   "private": true,
   "description": "Dokku/Heroku entry: real app lives in ./gym-tracker",
   "scripts": {
-    "build": "npm --prefix gym-tracker ci && npm --prefix gym-tracker run build",
+    "build": "npm --prefix gym-tracker ci && cd gym-tracker && npx expo export --platform web",
     "start": "./gym-tracker/node_modules/.bin/serve gym-tracker/dist -s -l tcp://0.0.0.0:$PORT"
   },
   "engines": {
-    "node": ">=20"
+    "node": "24.x"
   }
 }

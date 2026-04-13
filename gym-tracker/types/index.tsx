@@ -30,12 +30,22 @@ export interface RoutineExercise {
   sets?: RoutineSet[];  
 }
 
+/** Optional cardio slots on a routine; duration is the last template / “previous” value. */
+export interface RoutineCardio {
+  id: string;
+  name: string;
+  duration: string;
+  unit: 'min' | 'hr';
+}
+
 export interface Routine {
   id: string;
   name: string;
   day: 'Push' | 'Pull' | 'Legs' | 'Custom';
   customDayName?: string;
   exercises: RoutineExercise[];
+  /** If empty/undefined, no cardio block is shown during a workout. */
+  cardio?: RoutineCardio[];
   createdAt: Date;
   lastPerformed?: Date;
 }

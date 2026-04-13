@@ -18,7 +18,7 @@ import {
   Dimensions
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Routine, Exercise, WorkoutLog, Set as WorkoutSet } from '../../types';
+import { Routine, RoutineCardio, Exercise, WorkoutLog, Set as WorkoutSet } from '../../types';
 import exercisesData from '../../assets/data/exercises.json';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../backend/supabaseClient';
@@ -26,6 +26,44 @@ import ExerciseSearchModal from '../../components/ExerciseSearchModal';
 
 const STORAGE_KEY = '@workout_logs';
 const SESSION_KEY = '@currentSessionId';
+const ROUTINES_STORAGE_KEY = '@routines';
+
+const sessionCardioStorageKey = (sessionId: string) => `@session_cardio_${sessionId}`;
+
+type SessionCardioPayload = {
+  routineTemplateId: string | null;
+  rows: RoutineCardio[];
+};
+
+function parseSessionCardioPayload(raw: string | null): SessionCardioPayload {
+  if (!raw) return { routineTemplateId: null, rows: [] };
+  try {
+    const data = JSON.parse(raw);
+    if (Array.isArray(data)) {
+      return { routineTemplateId: null, rows: data as RoutineCardio[] };
+    }
+    return {
+      routineTemplateId: data.routineTemplateId ?? null,
+      rows: Array.isArray(data.rows) ? data.rows : [],
+    };
+  } catch {
+    return { routineTemplateId: null, rows: [] };
+  }
+}
+
+async function mergeCardioTemplateIntoRoutines(
+  routineId: string | null,
+  rows: RoutineCardio[]
+) {
+  if (!routineId || rows.length === 0) return;
+  const stored = await AsyncStorage.getItem(ROUTINES_STORAGE_KEY);
+  if (!stored) return;
+  const list: Routine[] = JSON.parse(stored);
+  const next = list.map((r) =>
+    r.id === routineId ? { ...r, cardio: rows.map((row) => ({ ...row })) } : r
+  );
+  await AsyncStorage.setItem(ROUTINES_STORAGE_KEY, JSON.stringify(next));
+}
 
 type SessionData = {
   session_name?: string;
@@ -377,6 +415,8 @@ export default function TodayScreen() {
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [selectedRoutine, setSelectedRoutine] = useState<Routine | null>(null);
+  const [sessionCardio, setSessionCardio] = useState<RoutineCardio[]>([]);
+  const [sessionRoutineTemplateId, setSessionRoutineTemplateId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
   const [showExerciseModal, setShowExerciseModal] = useState(false);
@@ -518,10 +558,18 @@ export default function TodayScreen() {
       }));
 
       setExercises(transformedExercises);
+
+      const cardioRaw = await AsyncStorage.getItem(sessionCardioStorageKey(sessionId));
+      const { rows, routineTemplateId } = parseSessionCardioPayload(cardioRaw);
+      setSessionCardio(rows);
+      setSessionRoutineTemplateId(routineTemplateId);
     } catch (error) {
       console.error('Failed to load session:', error);
       Alert.alert('Error', 'Failed to load session');
       await AsyncStorage.removeItem(SESSION_KEY);
+      await AsyncStorage.removeItem(sessionCardioStorageKey(sessionId));
+      setSessionCardio([]);
+      setSessionRoutineTemplateId(null);
       setCurrentSessionId(null);
       await loadRoutines(userId);
     }
@@ -626,9 +674,28 @@ export default function TodayScreen() {
 
       console.log('Sets created successfully');
 
+      const cardioTpl = selectedRoutine.cardio ?? [];
+      if (cardioTpl.length > 0) {
+        const rows = cardioTpl.map((c) => ({ ...c }));
+        const payload: SessionCardioPayload = {
+          routineTemplateId: selectedRoutine.id,
+          rows,
+        };
+        await AsyncStorage.setItem(
+          sessionCardioStorageKey(session.session_id),
+          JSON.stringify(payload)
+        );
+        setSessionCardio(rows);
+        setSessionRoutineTemplateId(selectedRoutine.id);
+      } else {
+        setSessionCardio([]);
+        setSessionRoutineTemplateId(null);
+        await AsyncStorage.removeItem(sessionCardioStorageKey(session.session_id));
+      }
+
       await AsyncStorage.setItem(SESSION_KEY, session.session_id);
       setCurrentSessionId(session.session_id);
-      
+
       await loadSession(session.session_id);
       console.log('Session loaded successfully');
     } catch (error: any) {
@@ -641,19 +708,24 @@ export default function TodayScreen() {
 
   const handleEndSession = async () => {
     if (!currentSessionId) return;
-    
+
     try {
       const endTime = new Date().toISOString().split('T')[1].split('.')[0];
-      
+
       await supabase
         .from('workout_sessions')
         .update({ end_time: endTime })
         .eq('session_id', currentSessionId);
 
+      await mergeCardioTemplateIntoRoutines(sessionRoutineTemplateId, sessionCardio);
+
+      await AsyncStorage.removeItem(sessionCardioStorageKey(currentSessionId));
       await AsyncStorage.removeItem(SESSION_KEY);
-      
+
       setCurrentSessionId(null);
       setExercises([]);
+      setSessionCardio([]);
+      setSessionRoutineTemplateId(null);
       setSelectedRoutine(null);
       setSessionData(null);
       setSessionNotes('');
@@ -669,6 +741,32 @@ export default function TodayScreen() {
       console.error('Failed to end session:', error);
       Alert.alert('Error', 'Failed to end session');
     }
+  };
+
+  const updateSessionCardio = (
+    index: number,
+    field: 'name' | 'duration' | 'unit',
+    value: string
+  ) => {
+    setSessionCardio((prev) => {
+      const next = [...prev];
+      if (field === 'unit') {
+        next[index] = { ...next[index], unit: value === 'hr' ? 'hr' : 'min' };
+      } else {
+        next[index] = { ...next[index], [field]: value };
+      }
+      if (currentSessionId) {
+        const payload: SessionCardioPayload = {
+          routineTemplateId: sessionRoutineTemplateId,
+          rows: next,
+        };
+        void AsyncStorage.setItem(
+          sessionCardioStorageKey(currentSessionId),
+          JSON.stringify(payload)
+        );
+      }
+      return next;
+    });
   };
 
   const handleRemoveExercise = (exerciseId: string) => {
@@ -934,15 +1032,19 @@ export default function TodayScreen() {
   const handleSignOut = async () => {
     try {
       await AsyncStorage.removeItem('userId');
+      const sid = await AsyncStorage.getItem(SESSION_KEY);
+      if (sid) await AsyncStorage.removeItem(sessionCardioStorageKey(sid));
       await AsyncStorage.removeItem(SESSION_KEY);
-      
+
       await supabase.auth.signOut();
-      
+
       setUserId(null);
       setCurrentSessionId(null);
       setExercises([]);
       setRoutines([]);
       setSelectedRoutine(null);
+      setSessionCardio([]);
+      setSessionRoutineTemplateId(null);
       setSessionData(null);
       setSessionNotes('');
       setNoteDraft('');
@@ -1202,6 +1304,67 @@ export default function TodayScreen() {
             </View>
           </View>
 
+          {sessionCardio.length > 0 && (
+            <View style={styles.cardioSessionSection}>
+              <Text style={styles.cardioSessionTitle}>Cardio today</Text>
+              <Text style={styles.cardioSessionHint}>
+                Log minutes or hours; values save to this routine for next time when you end the workout.
+              </Text>
+              {sessionCardio.map((row, idx) => (
+                <View
+                  key={row.id}
+                  style={[
+                    styles.cardioSessionRow,
+                    idx === sessionCardio.length - 1 && styles.cardioSessionRowLast,
+                  ]}>
+                  <Text style={styles.cardioSessionName} numberOfLines={1}>
+                    {row.name || 'Cardio'}
+                  </Text>
+                  <View style={styles.cardioSessionInputs}>
+                    <TextInput
+                      style={styles.cardioSessionDurationInput}
+                      value={row.duration}
+                      onChangeText={(t) => updateSessionCardio(idx, 'duration', t)}
+                      placeholder="0"
+                      placeholderTextColor="#444"
+                      keyboardType="numeric"
+                    />
+                    <View style={styles.cardioSessionUnitToggle}>
+                      <TouchableOpacity
+                        style={[
+                          styles.cardioSessionUnitChip,
+                          row.unit === 'min' && styles.cardioSessionUnitChipActive,
+                        ]}
+                        onPress={() => updateSessionCardio(idx, 'unit', 'min')}>
+                        <Text
+                          style={[
+                            styles.cardioSessionUnitChipText,
+                            row.unit === 'min' && styles.cardioSessionUnitChipTextActive,
+                          ]}>
+                          min
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.cardioSessionUnitChip,
+                          row.unit === 'hr' && styles.cardioSessionUnitChipActive,
+                        ]}
+                        onPress={() => updateSessionCardio(idx, 'unit', 'hr')}>
+                        <Text
+                          style={[
+                            styles.cardioSessionUnitChipText,
+                            row.unit === 'hr' && styles.cardioSessionUnitChipTextActive,
+                          ]}>
+                          hr
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+
           {exercises.map((exercise) => (
             <ExerciseCard
               key={exercise.id}
@@ -1387,6 +1550,82 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+  },
+  cardioSessionSection: {
+    backgroundColor: '#111',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#2A4A6A',
+  },
+  cardioSessionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  cardioSessionHint: {
+    fontSize: 12,
+    color: '#888',
+    marginBottom: 12,
+    lineHeight: 17,
+  },
+  cardioSessionRow: {
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A2A2A',
+  },
+  cardioSessionRowLast: {
+    marginBottom: 0,
+    paddingBottom: 0,
+    borderBottomWidth: 0,
+  },
+  cardioSessionName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginBottom: 8,
+  },
+  cardioSessionInputs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  cardioSessionDurationInput: {
+    flex: 1,
+    backgroundColor: '#000000',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    color: '#FFFFFF',
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  cardioSessionUnitToggle: {
+    flexDirection: 'row',
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  cardioSessionUnitChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: '#000000',
+  },
+  cardioSessionUnitChipActive: {
+    backgroundColor: '#0066CC',
+  },
+  cardioSessionUnitChipText: {
+    color: '#888',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  cardioSessionUnitChipTextActive: {
+    color: '#FFFFFF',
   },
   sectionTitle: {
     fontSize: 24,

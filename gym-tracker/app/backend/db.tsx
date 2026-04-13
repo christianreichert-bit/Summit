@@ -1,10 +1,7 @@
-import { supabase } from "./supabaseClient";
+import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import { localDb } from "./localDb";
 
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
-
-export const isOnline = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
+export const isOnline = isSupabaseConfigured;
 
 export const db = {
   // Auth
@@ -32,6 +29,13 @@ export const db = {
       return { error };
     }
     return localDb.signIn(email, password);
+  },
+
+  requestPasswordReset: async (email: string, redirectTo?: string) => {
+    if (isOnline) {
+      return supabase.auth.resetPasswordForEmail(email, redirectTo ? { redirectTo } : undefined);
+    }
+    return localDb.requestPasswordReset(email);
   },
 
   signOut: async () => {

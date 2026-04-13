@@ -36,8 +36,10 @@ function RootNav() {
     if (loading) return;
 
     const inAuthScreen = segments[0] === "auth";
+    const inResetPasswordScreen = segments[0] === "reset-password";
+    const inPublicRoute = inAuthScreen || inResetPasswordScreen;
 
-    if (!session && !inAuthScreen) {
+    if (!session && !inPublicRoute) {
       router.replace("/auth");
       return;
     }
@@ -60,6 +62,7 @@ function RootNav() {
       >
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="auth" />
+        <Stack.Screen name="reset-password" />
         <Stack.Screen name="settings" options={{ animation: "slide_from_bottom", animationDuration: 280 }} />
         <Stack.Screen name="test" options={{ animation: "slide_from_right", animationDuration: 280 }} />
       </Stack>

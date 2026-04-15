@@ -162,7 +162,7 @@ const ExerciseCard = ({
     }
   }, [activeField, activeSetIndex, exercise.sets, focusedField, focusedSetNumber, isFocused]);
 
-  // Reset to first set when card gains focus
+  // Reset to first set
   useEffect(() => {
     if (isFocused) {
       setActiveSetIndex(0);
@@ -964,7 +964,7 @@ export default function TodayScreen() {
     const setIndex = exercise.sets.findIndex((set) => set.setNumber === activeInputTarget.setNumber);
     if (setIndex < 0) return;
 
-    // Approximate rows within each card to keep active input above custom keyboard.
+    //Adjusts based on current set    
     const cardTopPadding = 110;
     const perSetRowHeight = 46;
     const targetY = Math.max(0, layout.y + cardTopPadding + (setIndex * perSetRowHeight) - 20);
@@ -1304,16 +1304,6 @@ export default function TodayScreen() {
                 onPress={handleEndSession}>
                 <Text style={styles.endSessionButtonText}>End Workout</Text>
               </TouchableOpacity>
-              {focusedExerciseId && (
-                <TouchableOpacity
-                  style={styles.unfocusButton}
-                  onPress={() => {
-                    setFocusedExerciseId(null);
-                    setActiveInputTarget(null);
-                  }}>
-                  <Text style={styles.unfocusButtonText}>Unfocus</Text>
-                </TouchableOpacity>
-              )}
             </View>
           </View>
 
@@ -1972,17 +1962,6 @@ const styles = StyleSheet.create({
   noteButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '600',
-  },
-  unfocusButton: {
-    backgroundColor: '#333333',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  unfocusButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
     fontWeight: '600',
   },
   notePreviewCard: {

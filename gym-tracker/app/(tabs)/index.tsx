@@ -14,8 +14,6 @@ import {
   ActivityIndicator,
   Modal,
   KeyboardAvoidingView,
-  PanResponder,
-  Dimensions
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Routine, Exercise, WorkoutLog, Set as WorkoutSet } from '../../types';
@@ -23,6 +21,7 @@ import exercisesData from '../../assets/data/exercises.json';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../backend/supabaseClient';
 import ExerciseSearchModal from '../../components/ExerciseSearchModal';
+import WorkoutKeyboard from '../../components/WorkoutKeyboard';
 
 const STORAGE_KEY = '@workout_logs';
 const SESSION_KEY = '@currentSessionId';
@@ -36,27 +35,25 @@ type SessionData = {
 
 type SetRowProps = {
   set: WorkoutSet;
-  onUpdateSet: (setNumber: number, field: 'reps' | 'weight', value: string) => void;
   onToggleComplete: (setNumber: number) => void;
+  onActivateField: (setNumber: number, field: 'reps' | 'weight') => void;
   isActive?: boolean;
   activeField?: 'reps' | 'weight';
-  repsRef?: (ref: TextInput | null) => void;
-  weightRef?: (ref: TextInput | null) => void;
 };
 
 type ExerciseCardProps = {
   exercise: Exercise;
   isFocused: boolean;
   onFocus: (exerciseId: string) => void;
-  onSwipeVertical: (direction: 'up' | 'down' | 'left' | 'right', exerciseId: string) => void;
-  onNavigateExercise: (exerciseId: string, direction: 'prev' | 'next') => void;
   onCardLayout: (exerciseId: string, y: number, height: number) => void;
-  focusInitialSet?: 'first' | 'last';
+  focusedSetNumber?: number;
+  focusedField?: 'reps' | 'weight';
   onRemove: (exerciseId: string) => void;
   onUpdateSet: (setNumber: number, field: 'reps' | 'weight', value: string) => void;
   onToggleSet: (exerciseId: string, setNumber: number) => void;
   onAddSet: (exerciseId: string) => void;
   onRemoveSet: (exerciseId: string) => void;
+  onActiveTargetChange: (exerciseId: string, setNumber: number, field: 'reps' | 'weight') => void;
   onReplace?: (exerciseId: string) => void;
 };
 
@@ -91,27 +88,9 @@ const formatElapsedTime = (totalSeconds: number) => {
 };
 
 // Set Row Component
-const SetRow = ({ set, onUpdateSet, onToggleComplete, isActive, activeField, repsRef, weightRef }: SetRowProps) => {
-  const [reps, setReps] = useState(set.reps);
-  const [weight, setWeight] = useState(set.weight);
-
-  useEffect(() => {
-    setReps(set.reps);
-    setWeight(set.weight);
-  }, [set]);
-
-  const handleRepsChange = (text: string) => {
-    setReps(text);
-    onUpdateSet(set.setNumber, 'reps', text);
-  };
-
-  const handleWeightChange = (text: string) => {
-    setWeight(text);
-    onUpdateSet(set.setNumber, 'weight', text);
-  };
-
+const SetRow = ({ set, onToggleComplete, onActivateField, isActive, activeField }: SetRowProps) => {
   return (
-    <View style={[styles.setRow, set.completed && styles.setRowCompleted]}>
+    <View style={[styles.setRow, isActive && styles.setRowActive, set.completed && styles.setRowCompleted]}>
       <TouchableOpacity
         style={[styles.checkbox, set.completed && styles.checkboxCompleted]}
         onPress={() => onToggleComplete(set.setNumber)}>
@@ -121,30 +100,28 @@ const SetRow = ({ set, onUpdateSet, onToggleComplete, isActive, activeField, rep
         <Text style={styles.setNumberText}>{set.setNumber}</Text>
       </View>
       <View style={styles.setInputCell}>
-        <TextInput
-          ref={repsRef}
-          style={[styles.setInput, set.completed && styles.inputCompleted, isActive && activeField === 'reps' && styles.activeInput]}
-          value={reps}
-          onChangeText={handleRepsChange}
-          keyboardType="numeric"
-          placeholder="0"
-          placeholderTextColor="#444"
-          selectionColor="#0066CC"
-          editable={!set.completed}
-        />
+        <TouchableOpacity
+          style={[
+            styles.setInput,
+            isActive && activeField === 'reps' && styles.activeInput,
+            set.completed && styles.inputCompleted,
+          ]}
+          onPress={() => { if (!set.completed) onActivateField(set.setNumber, 'reps'); }}
+          activeOpacity={set.completed ? 1 : 0.7}>
+          <Text style={styles.setInputText}>{set.reps || '0'}</Text>
+        </TouchableOpacity>
       </View>
       <View style={styles.setInputCell}>
-        <TextInput
-          ref={weightRef}
-          style={[styles.setInput, set.completed && styles.inputCompleted, isActive && activeField === 'weight' && styles.activeInput]}
-          value={weight}
-          onChangeText={handleWeightChange}
-          keyboardType="numeric"
-          placeholder="0"
-          placeholderTextColor="#444"
-          selectionColor="#0066CC"
-          editable={!set.completed}
-        />
+        <TouchableOpacity
+          style={[
+            styles.setInput,
+            isActive && activeField === 'weight' && styles.activeInput,
+            set.completed && styles.inputCompleted,
+          ]}
+          onPress={() => { if (!set.completed) onActivateField(set.setNumber, 'weight'); }}
+          activeOpacity={set.completed ? 1 : 0.7}>
+          <Text style={styles.setInputText}>{set.weight || '0'}</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -155,128 +132,57 @@ const ExerciseCard = ({
   exercise,
   isFocused,
   onFocus,
-  onSwipeVertical,
-  onNavigateExercise,
+  onCardLayout,
+  focusedSetNumber,
+  focusedField,
   onRemove,
   onUpdateSet,
   onToggleSet,
   onAddSet,
   onRemoveSet,
+  onActiveTargetChange,
   onReplace = (_id: string) => {},
-  onCardLayout,
-  focusInitialSet = 'first',
 }: ExerciseCardProps) => {
   const [expanded, setExpanded] = useState(true);
   const [activeSetIndex, setActiveSetIndex] = useState(0);
   const [activeField, setActiveField] = useState<'reps' | 'weight'>('reps');
-  const inputRefs = useRef<{ [key: string]: TextInput | null }>({});
-  const isFocusedRef = useRef(isFocused);
-  const activeSetIndexRef = useRef(0);
-  const swipeHandlerRef = useRef<(dir: 'up' | 'down' | 'left' | 'right') => void>(() => {});
 
   useEffect(() => {
-    isFocusedRef.current = isFocused;
-  }, [isFocused]);
+    if (!isFocused || !focusedSetNumber) return;
+    const nextIndex = exercise.sets.findIndex((set) => set.setNumber === focusedSetNumber);
+    if (nextIndex < 0) return;
 
-  useEffect(() => {
-    activeSetIndexRef.current = activeSetIndex;
-  }, [activeSetIndex]);
+    const nextField = focusedField ?? activeField;
+    const shouldUpdate = nextIndex !== activeSetIndex || nextField !== activeField;
+    if (!shouldUpdate) return;
 
-  // Keep swipe handler up to date with latest state
-  useEffect(() => {
-    swipeHandlerRef.current = (dir: 'up' | 'down' | 'left' | 'right') => {
-      onSwipeVertical(dir, exercise.id);
-      if (dir === 'right') {
-        setActiveField('weight');
-      } else if (dir === 'left') {
-        setActiveField('reps');
-      } else if (dir === 'up') {
-        if (activeSetIndexRef.current === 0) {
-          onNavigateExercise(exercise.id, 'prev');
-        } else {
-          setActiveSetIndex((i) => i - 1);
-        }
-      } else if (dir === 'down') {
-        if (activeSetIndexRef.current === exercise.sets.length - 1) {
-          onNavigateExercise(exercise.id, 'next');
-        } else {
-          setActiveSetIndex((i) => i + 1);
-        }
-      }
-    };
-  });
+    setActiveSetIndex(nextIndex);
+    if (focusedField) {
+      setActiveField(focusedField);
+    }
+  }, [activeField, activeSetIndex, exercise.sets, focusedField, focusedSetNumber, isFocused]);
 
-  // Reset to first or last set when card gains focus
+  // Reset to first set when card gains focus
   useEffect(() => {
     if (isFocused) {
-      const startIdx = focusInitialSet === 'last' ? Math.max(0, exercise.sets.length - 1) : 0;
-      setActiveSetIndex(startIdx);
+      setActiveSetIndex(0);
       setActiveField('reps');
     }
   }, [isFocused]);
-
-  // Auto-focus the correct TextInput whenever active set/field changes
-  useEffect(() => {
-    if (!isFocused) return;
-    const activeSet = exercise.sets[activeSetIndex];
-    if (!activeSet) return;
-    const key = `${activeSet.setNumber}_${activeField}`;
-    inputRefs.current[key]?.focus();
-  }, [activeSetIndex, activeField, isFocused, exercise.sets]);
-
-  const cardPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponderCapture: (_evt, gestureState) => {
-        if (!isFocusedRef.current) return false;
-        const absDx = Math.abs(gestureState.dx);
-        const absDy = Math.abs(gestureState.dy);
-        return absDx > 12 || absDy > 12;
-      },
-      onMoveShouldSetPanResponder: (_evt, gestureState) => {
-        if (!isFocusedRef.current) return false;
-        const absDx = Math.abs(gestureState.dx);
-        const absDy = Math.abs(gestureState.dy);
-        return absDx > 12 || absDy > 12;
-      },
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderRelease: (_evt, gestureState) => {
-        if (!isFocusedRef.current) return;
-        const { dx, dy } = gestureState;
-        const absDx = Math.abs(dx);
-        const absDy = Math.abs(dy);
-        if (absDx < 12 && absDy < 12) return;
-        if (absDx > absDy) {
-          swipeHandlerRef.current(dx > 0 ? 'right' : 'left');
-          return;
-        }
-        swipeHandlerRef.current(dy > 0 ? 'down' : 'up');
-      },
-    })
-  ).current;
-
-  const handleUpdateSet = (setNumber: number, field: 'reps' | 'weight', value: string) => {
-    onUpdateSet(setNumber, field, value);
-  };
 
   const completedCount = exercise.sets.filter((s) => s.completed).length;
 
   return (
     <View
       style={[styles.exerciseCard, isFocused && styles.focusedExerciseCard]}
-      onTouchStart={() => onFocus(exercise.id)}
       onLayout={(e) => onCardLayout(exercise.id, e.nativeEvent.layout.y, e.nativeEvent.layout.height)}
-      {...cardPanResponder.panHandlers}>
+      onTouchStart={() => onFocus(exercise.id)}>
       {/* Exercise Header */}
-      <TouchableOpacity
-        style={styles.exerciseHeader}
-        onPress={() => {
-          onFocus(exercise.id);
-          setExpanded(!expanded);
-        }}
-        activeOpacity={0.7}>
+      <View style={styles.exerciseHeader}>
         <View style={styles.exerciseHeaderLeft}>
-          <Text style={styles.chevron}>{expanded ? '▼' : '▶'}</Text>
+          <TouchableOpacity onPress={() => setExpanded(!expanded)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Text style={styles.chevron}>{expanded ? '▼' : '▶'}</Text>
+          </TouchableOpacity>
           <View style={styles.exerciseInfo}>
             <Text style={styles.exerciseName}>{exercise.name}</Text>
             <View style={styles.exerciseMetaRow}>
@@ -287,18 +193,12 @@ const ExerciseCard = ({
               <View style={styles.setAdjustControls}>
                 <TouchableOpacity
                   style={styles.setAdjustButton}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    onRemoveSet(exercise.id);
-                  }}>
+                  onPress={() => onRemoveSet(exercise.id)}>
                   <Text style={styles.setAdjustButtonText}>−</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.setAdjustButton}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    onAddSet(exercise.id);
-                  }}>
+                  onPress={() => onAddSet(exercise.id)}>
                   <Text style={styles.setAdjustButtonText}>+</Text>
                 </TouchableOpacity>
               </View>
@@ -315,24 +215,18 @@ const ExerciseCard = ({
         <View style={styles.exerciseActions}>
           <TouchableOpacity
             style={styles.replaceButton}
-            onPress={(e) => {
-              e.stopPropagation();
-              onReplace(exercise.id);
-            }}
+            onPress={() => onReplace(exercise.id)}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <Text style={styles.replaceIcon}>⟳</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.removeButton}
-            onPress={(e) => {
-              e.stopPropagation();
-              onRemove(exercise.id);
-            }}
+            onPress={() => onRemove(exercise.id)}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <Text style={styles.removeIcon}>−</Text>
           </TouchableOpacity>
         </View>
-      </TouchableOpacity>
+      </View>
 
       {/* Expanded Sets Table */}
       {expanded && (
@@ -358,9 +252,12 @@ const ExerciseCard = ({
               set={set}
               isActive={isFocused && idx === activeSetIndex}
               activeField={activeField}
-              repsRef={(ref) => { inputRefs.current[`${set.setNumber}_reps`] = ref; }}
-              weightRef={(ref) => { inputRefs.current[`${set.setNumber}_weight`] = ref; }}
-              onUpdateSet={(setNum: number, field: 'reps' | 'weight', value: string) => handleUpdateSet(setNum, field, value)}
+              onActivateField={(setNum: number, field: 'reps' | 'weight') => {
+                setActiveSetIndex(idx);
+                setActiveField(field);
+                onFocus(exercise.id);
+                onActiveTargetChange(exercise.id, setNum, field);
+              }}
               onToggleComplete={(setNum: number) => onToggleSet(exercise.id, setNum)}
             />
           ))}
@@ -390,10 +287,13 @@ export default function TodayScreen() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [focusedExerciseId, setFocusedExerciseId] = useState<string | null>(null);
-  const [focusedInitialSet, setFocusedInitialSet] = useState<'first' | 'last'>('first');
+  const [activeInputTarget, setActiveInputTarget] = useState<{
+    exerciseId: string;
+    setNumber: number;
+    field: 'reps' | 'weight';
+  } | null>(null);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
-  const exercisesContainerYRef = useRef(0);
   const cardLayoutMapRef = useRef<{ [id: string]: { y: number; height: number } }>({});
 
   const buildPresetSetsFromRoutine = (routineExercise: Routine['exercises'][number]) => {
@@ -476,8 +376,16 @@ export default function TodayScreen() {
       console.log('Reading userid on index.tsx:', storedUserId);
       setUserId(storedUserId);
 
-      const sessionId: string | null = await AsyncStorage.getItem(SESSION_KEY);
-      
+      const storedSessionId = await AsyncStorage.getItem(SESSION_KEY);
+      const sessionId =
+        storedSessionId && storedSessionId !== 'undefined' && storedSessionId !== 'null'
+          ? storedSessionId
+          : null;
+
+      if (!sessionId && storedSessionId) {
+        await AsyncStorage.removeItem(SESSION_KEY);
+      }
+
       if (sessionId) {
         await loadSession(sessionId);
         setCurrentSessionId(sessionId);
@@ -654,8 +562,13 @@ export default function TodayScreen() {
 
       console.log('Sets created successfully');
 
-      await AsyncStorage.setItem(SESSION_KEY, session.session_id);
-      setCurrentSessionId(session.session_id);
+      if (session?.session_id == null) {
+        throw new Error('Session was created but session_id is missing');
+      }
+
+      const persistedSessionId = String(session.session_id);
+      await AsyncStorage.setItem(SESSION_KEY, persistedSessionId);
+      setCurrentSessionId(persistedSessionId);
 
       // Build exercise state directly from routine data so reps/weight are preloaded
       const transformedExercises: Exercise[] = createdExercises.map((ex, index) => {
@@ -725,6 +638,7 @@ export default function TodayScreen() {
       setSessionNotes('');
       setNoteDraft('');
       setShowNotesModal(false);
+      setActiveInputTarget(null);
       clearTimerInterval();
       setTimerOrigin(null);
       setElapsedSeconds(0);
@@ -738,6 +652,9 @@ export default function TodayScreen() {
   };
 
   const handleRemoveExercise = (exerciseId: string) => {
+    if (activeInputTarget?.exerciseId === exerciseId) {
+      setActiveInputTarget(null);
+    }
     setExercises(exercises.filter((ex) => ex.id !== exerciseId));
   };
 
@@ -900,6 +817,17 @@ export default function TodayScreen() {
             : ex
         )
       );
+
+      if (activeInputTarget?.exerciseId === exerciseId && activeInputTarget.setNumber >= lastSetNumber) {
+        setActiveInputTarget((prev) =>
+          prev
+            ? {
+                ...prev,
+                setNumber: Math.max(1, lastSetNumber - 1),
+              }
+            : prev
+        );
+      }
     } catch (error) {
       console.error('Failed to remove set:', error);
       Alert.alert('Error', 'Failed to remove set');
@@ -1013,6 +941,7 @@ export default function TodayScreen() {
       setSessionNotes('');
       setNoteDraft('');
       setShowNotesModal(false);
+      setActiveInputTarget(null);
       clearTimerInterval();
       setTimerOrigin(null);
       setElapsedSeconds(0);
@@ -1024,6 +953,26 @@ export default function TodayScreen() {
       Alert.alert('Error', 'Failed to sign out');
     }
   };
+
+  useEffect(() => {
+    if (!activeInputTarget) return;
+
+    const exercise = exercises.find((ex) => ex.id === activeInputTarget.exerciseId);
+    const layout = cardLayoutMapRef.current[activeInputTarget.exerciseId];
+    if (!exercise || !layout) return;
+
+    const setIndex = exercise.sets.findIndex((set) => set.setNumber === activeInputTarget.setNumber);
+    if (setIndex < 0) return;
+
+    // Approximate rows within each card to keep active input above custom keyboard.
+    const cardTopPadding = 110;
+    const perSetRowHeight = 46;
+    const targetY = Math.max(0, layout.y + cardTopPadding + (setIndex * perSetRowHeight) - 20);
+
+    requestAnimationFrame(() => {
+      scrollViewRef.current?.scrollTo({ y: targetY, animated: true });
+    });
+  }, [activeInputTarget, exercises]);
 
   if (loading) {
     return (
@@ -1159,41 +1108,139 @@ export default function TodayScreen() {
     startTimer(Date.now() - (elapsedSeconds * 1000));
   };
 
-  const handleFocusExerciseCard = (exerciseId: string, initialSet: 'first' | 'last' = 'first') => {
-    setFocusedInitialSet(initialSet);
+  const handleFocusExerciseCard = (exerciseId: string) => {
     setFocusedExerciseId(exerciseId);
-    const layout = cardLayoutMapRef.current[exerciseId];
-    if (layout) {
-      const windowHeight = Dimensions.get('window').height;
-      const targetY = exercisesContainerYRef.current + layout.y - windowHeight / 2 + layout.height / 2;
-      scrollViewRef.current?.scrollTo({ y: Math.max(0, targetY), animated: true });
-    }
+    setActiveInputTarget(null);
   };
 
-  const handleNavigateExercise = (exerciseId: string, direction: 'prev' | 'next') => {
-    const idx = exercises.findIndex((ex) => ex.id === exerciseId);
-    if (direction === 'next' && idx < exercises.length - 1) {
-      handleFocusExerciseCard(exercises[idx + 1].id, 'first');
-    } else if (direction === 'prev' && idx > 0) {
-      handleFocusExerciseCard(exercises[idx - 1].id, 'last');
+  const handleActiveTargetChange = (exerciseId: string, setNumber: number, field: 'reps' | 'weight') => {
+    setActiveInputTarget((prev) => {
+      if (
+        prev &&
+        prev.exerciseId === exerciseId &&
+        prev.setNumber === setNumber &&
+        prev.field === field
+      ) {
+        return prev;
+      }
+
+      return { exerciseId, setNumber, field };
+    });
+  };
+
+  const adjustActiveInputValue = async (direction: 'inc' | 'dec') => {
+    if (!activeInputTarget) return;
+
+    const exercise = exercises.find((ex) => ex.id === activeInputTarget.exerciseId);
+    const targetSet = exercise?.sets.find((set) => set.setNumber === activeInputTarget.setNumber);
+    if (!exercise || !targetSet || targetSet.completed) return;
+
+    const isReps = activeInputTarget.field === 'reps';
+    const step = isReps ? 1 : 5;
+    const min = 0;
+    const max = isReps ? 50 : 500;
+    const parsed = parseInt(targetSet[activeInputTarget.field] || '0', 10);
+    const currentValue = Number.isFinite(parsed) ? parsed : 0;
+    const nextValue = direction === 'inc' ? currentValue + step : currentValue - step;
+    const clampedValue = Math.max(min, Math.min(max, nextValue));
+
+    await handleUpdateSet(
+      activeInputTarget.exerciseId,
+      activeInputTarget.setNumber,
+      activeInputTarget.field,
+      clampedValue.toString()
+    );
+  };
+
+  const moveActiveInputTarget = (direction: 'left' | 'up' | 'down' | 'right') => {
+    if (!activeInputTarget) return;
+
+    const exerciseIndex = exercises.findIndex((ex) => ex.id === activeInputTarget.exerciseId);
+    if (exerciseIndex < 0) return;
+
+    const exercise = exercises[exerciseIndex];
+    if (!exercise || exercise.sets.length === 0) return;
+
+    const currentSetIndex = exercise.sets.findIndex((set) => set.setNumber === activeInputTarget.setNumber);
+    if (currentSetIndex < 0) return;
+
+    let nextExerciseId = activeInputTarget.exerciseId;
+    let nextSetNumber = activeInputTarget.setNumber;
+    let nextField = activeInputTarget.field;
+
+    if (direction === 'left' || direction === 'right') {
+      nextField = direction === 'left' ? 'reps' : 'weight';
+    } else {
+      const delta = direction === 'down' ? 1 : -1;
+      const tentativeIndex = currentSetIndex + delta;
+
+      if (tentativeIndex < 0) {
+        const prevExercise = exercises[exerciseIndex - 1];
+        if (!prevExercise || prevExercise.sets.length === 0) return;
+        nextExerciseId = prevExercise.id;
+        nextSetNumber = prevExercise.sets[prevExercise.sets.length - 1].setNumber;
+      } else if (tentativeIndex >= exercise.sets.length) {
+        const followingExercise = exercises[exerciseIndex + 1];
+        if (!followingExercise || followingExercise.sets.length === 0) return;
+        nextExerciseId = followingExercise.id;
+        nextSetNumber = followingExercise.sets[0].setNumber;
+      } else {
+        const nextSet = exercise.sets[tentativeIndex];
+        if (!nextSet) return;
+        nextSetNumber = nextSet.setNumber;
+      }
     }
+
+    if (
+      nextExerciseId === activeInputTarget.exerciseId &&
+      nextSetNumber === activeInputTarget.setNumber &&
+      nextField === activeInputTarget.field
+    ) {
+      return;
+    }
+
+    setActiveInputTarget((prev) => {
+      if (!prev) return prev;
+      if (
+        prev.exerciseId === nextExerciseId &&
+        prev.setNumber === nextSetNumber &&
+        prev.field === nextField
+      ) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        exerciseId: nextExerciseId,
+        setNumber: nextSetNumber,
+        field: nextField,
+      };
+    });
+    setFocusedExerciseId(nextExerciseId);
   };
 
   const handleCardLayout = (exerciseId: string, y: number, height: number) => {
     cardLayoutMapRef.current[exerciseId] = { y, height };
   };
 
-  const handleFocusedCardSwipeVertical = (direction: 'up' | 'down' | 'left' | 'right') => {
-    console.log(direction);
-  };
+  const activeValue = activeInputTarget
+    ? exercises
+        .find((ex) => ex.id === activeInputTarget.exerciseId)
+        ?.sets.find((s) => s.setNumber === activeInputTarget.setNumber)
+        ?.[activeInputTarget.field] ?? ''
+    : '';
+
+  const fieldKey = activeInputTarget
+    ? `${activeInputTarget.exerciseId}_${activeInputTarget.setNumber}_${activeInputTarget.field}`
+    : '';
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
         ref={scrollViewRef}
-        scrollEnabled={!focusedExerciseId}
+        scrollEnabled={true}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, focusedExerciseId && activeInputTarget ? styles.scrollContentWithKeyboard : undefined]}
         keyboardShouldPersistTaps="handled"
         stickyHeaderIndices={[1]}>
         
@@ -1241,8 +1288,7 @@ export default function TodayScreen() {
         </View>
 
         <View
-          style={styles.exercisesContainer}
-          onLayout={(e) => { exercisesContainerYRef.current = e.nativeEvent.layout.y; }}>
+          style={styles.exercisesContainer}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>{sessionData?.session_name || 'Workout'}</Text>
             <View style={styles.headerButtons}>
@@ -1261,7 +1307,10 @@ export default function TodayScreen() {
               {focusedExerciseId && (
                 <TouchableOpacity
                   style={styles.unfocusButton}
-                  onPress={() => setFocusedExerciseId(null)}>
+                  onPress={() => {
+                    setFocusedExerciseId(null);
+                    setActiveInputTarget(null);
+                  }}>
                   <Text style={styles.unfocusButtonText}>Unfocus</Text>
                 </TouchableOpacity>
               )}
@@ -1273,11 +1322,14 @@ export default function TodayScreen() {
               key={exercise.id}
               exercise={exercise}
               isFocused={focusedExerciseId === exercise.id}
-              focusInitialSet={focusedExerciseId === exercise.id ? focusedInitialSet : 'first'}
               onFocus={handleFocusExerciseCard}
-              onSwipeVertical={handleFocusedCardSwipeVertical}
-              onNavigateExercise={handleNavigateExercise}
               onCardLayout={handleCardLayout}
+              focusedSetNumber={
+                activeInputTarget?.exerciseId === exercise.id ? activeInputTarget.setNumber : undefined
+              }
+              focusedField={
+                activeInputTarget?.exerciseId === exercise.id ? activeInputTarget.field : undefined
+              }
               onRemove={handleRemoveExercise}
               onUpdateSet={(setNum: number, field: 'reps' | 'weight', value: string) =>
                 handleUpdateSet(exercise.id, setNum, field, value)
@@ -1285,6 +1337,7 @@ export default function TodayScreen() {
               onToggleSet={handleToggleSet}
               onAddSet={handleAddSet}
               onRemoveSet={handleRemoveSet}
+              onActiveTargetChange={handleActiveTargetChange}
               onReplace={(id) => {
                 setReplaceExerciseId(id);
                 setShowExerciseModal(true);
@@ -1308,6 +1361,29 @@ export default function TodayScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      <WorkoutKeyboard
+        visible={!!(focusedExerciseId && activeInputTarget)}
+        value={activeValue}
+        field={activeInputTarget?.field ?? 'reps'}
+        fieldKey={fieldKey}
+        onValueChange={(val) => {
+          if (!activeInputTarget) return;
+          handleUpdateSet(
+            activeInputTarget.exerciseId,
+            activeInputTarget.setNumber,
+            activeInputTarget.field,
+            val,
+          );
+        }}
+        onStepUp={() => adjustActiveInputValue('inc')}
+        onStepDown={() => adjustActiveInputValue('dec')}
+        onMoveLeft={() => moveActiveInputTarget('left')}
+        onMoveUp={() => moveActiveInputTarget('up')}
+        onMoveDown={() => moveActiveInputTarget('down')}
+        onMoveRight={() => moveActiveInputTarget('right')}
+        onDone={() => setActiveInputTarget(null)}
+      />
 
       <ExerciseSearchModal
         visible={showExerciseModal}
@@ -1384,7 +1460,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
   },
   scrollContent: {
-    paddingBottom: 30,
+    paddingBottom: 180,
+  },
+  scrollContentWithKeyboard: {
+    paddingBottom: 400,
   },
   header: {
     paddingTop: Platform.OS === 'ios' ? 20 : 40,
@@ -1636,6 +1715,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginBottom: 10,
     alignItems: 'center',
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  setRowActive: {
+    backgroundColor: 'rgba(0, 102, 204, 0.12)',
   },
   setRowCompleted: {
     opacity: 0.6,
@@ -1673,18 +1758,22 @@ const styles = StyleSheet.create({
   setInput: {
     backgroundColor: '#000000',
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
     width: '80%',
-    color: '#FFFFFF',
-    fontSize: 14,
-    textAlign: 'center',
+    height: 40,
     borderWidth: 1,
     borderColor: '#333',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  setInputText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   inputCompleted: {
     opacity: 0.5,
-    textDecorationLine: 'line-through',
   },
   emptyState: {
     padding: 40,
@@ -1975,6 +2064,50 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
+  },
+  bottomAdjusterContainer: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: Platform.OS === 'ios' ? 0 : 78,
+    backgroundColor: '#121212',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#333',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 20,
+  },
+  bottomAdjusterLabel: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: 12,
+  },
+  bottomAdjusterActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  bottomAdjusterButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#333',
+    backgroundColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bottomAdjusterButtonText: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    lineHeight: 28,
+    fontWeight: '700',
   },
   noteModalOverlay: {
     flex: 1,

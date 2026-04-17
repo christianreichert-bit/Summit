@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 type User = {
   user_id: string;
   username: string;
@@ -69,13 +71,6 @@ let localWorkoutSessions: WorkoutSession[] = [];
 let localSessionExercises: SessionExercise[] = [];
 let localSessionExerciseSets: SessionExerciseSet[] = [];
 let localSession: { user: { id: string; email: string } } | null = null;
-const authListeners: ((event: string, session: any) => void)[] = [];
-
-function emitAuthStateChange(event: string) {
-  for (const listener of authListeners) {
-    listener(event, localSession);
-  }
-}
 
 type PersonalRecord = {
   pr_id: number;
@@ -118,7 +113,6 @@ export const localDb = {
     };
     localUsers.push(user);
     localSession = { user: { id: userId, email } };
-    emitAuthStateChange("SIGNED_IN");
     return { data: { user: { id: userId } }, error: null };
   },
 
@@ -128,13 +122,11 @@ export const localDb = {
       return { data: null, error: { message: "User not found" } };
     }
     localSession = { user: { id: user.user_id, email } };
-    emitAuthStateChange("SIGNED_IN");
     return { data: { user: { id: user.user_id } }, error: null };
   },
 
   signOut: async () => {
     localSession = null;
-    emitAuthStateChange("SIGNED_OUT");
   },
 
   getSession: async () => {
@@ -150,7 +142,7 @@ export const localDb = {
     return { data: user, error: user ? null : { message: "User not found" } };
   },
 
-  updateUserProfile: async (userId: string, updates: { username: string }) => {
+  updateUserProfile: async (userId: string, updates: { username?: string; bio?: string | null; avatar_url?: string | null }) => {
     const user = localUsers.find((u) => u.user_id === userId);
     if (!user) return { data: null, error: { message: "User not found" } };
     Object.assign(user, updates);
@@ -162,16 +154,10 @@ export const localDb = {
   },
 
   onAuthStateChange: (callback: (event: string, session: any) => void) => {
-    authListeners.push(callback);
     return {
       data: {
         subscription: {
-          unsubscribe: () => {
-            const index = authListeners.indexOf(callback);
-            if (index !== -1) {
-              authListeners.splice(index, 1);
-            }
-          },
+          unsubscribe: () => {},
         },
       },
     };
@@ -196,6 +182,13 @@ export const localDb = {
       created_at: new Date().toISOString(),
     };
     localRoutines.push(newRoutine);
+    return { error: null };
+  },
+
+  updateRoutine: async (routineId: number, updates: { routine_name?: string; description?: string | null; routine_order?: number }) => {
+    localRoutines = localRoutines.map((r) =>
+      r.routine_id === routineId ? { ...r, ...updates } : r
+    );
     return { error: null };
   },
 
@@ -241,6 +234,13 @@ export const localDb = {
     );
     localRoutineExercises = localRoutineExercises.filter(
       (re) => re.routine_exercise_id !== routineExerciseId
+    );
+    return { error: null };
+  },
+
+  updateRoutineExercise: async (routineExerciseId: number, updates: { exercise_id?: string; exercise_name?: string }) => {
+    localRoutineExercises = localRoutineExercises.map((e) =>
+      e.routine_exercise_id === routineExerciseId ? { ...e, ...updates } : e
     );
     return { error: null };
   },
@@ -298,7 +298,7 @@ export const localDb = {
       session_id: nextSessionId++,
       routine_id: params.routine_id,
       session_name: params.session_name,
-      session_date: now.toISOString().split("T")[0],
+      session_date: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
       start_time: now.toTimeString().split(" ")[0],
       end_time: null,
       notes: null,
@@ -343,7 +343,7 @@ export const localDb = {
   },
 
   // Update session notes
-  updateWorkoutSession: async (sessionId: number, updates: { notes?: string; session_name?: string }) => {
+  updateWorkoutSession: async (sessionId: number, updates: { notes?: string | null; session_name?: string }) => {
     localWorkoutSessions = localWorkoutSessions.map((s) =>
       s.session_id === sessionId ? { ...s, ...updates } : s
     );
@@ -387,7 +387,7 @@ export const localDb = {
     return { data: newExercise, error: null };
   },
 
-  updateSessionExercise: async (sessionExerciseId: number, updates: { notes?: string }) => {
+  updateSessionExercise: async (sessionExerciseId: number, updates: { notes?: string; exercise_id?: string; exercise_name?: string }) => {
     localSessionExercises = localSessionExercises.map((e) =>
       e.session_exercise_id === sessionExerciseId ? { ...e, ...updates } : e
     );
@@ -459,7 +459,7 @@ export const localDb = {
       session_id: nextSessionId++,
       routine_id: routineId,
       session_name: routine.routine_name,
-      session_date: now.toISOString().split("T")[0],
+      session_date: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
       start_time: now.toTimeString().split(" ")[0],
       end_time: null,
       notes: null,

@@ -15,9 +15,8 @@ function scoreExercise(
   queryNorm: string,
   tokens: string[]
 ): number {
-  for (const t of tokens) {
-    if (!nameNorm.includes(t)) return -1;
-  }
+  const matchedTokens = tokens.filter((t) => nameNorm.includes(t));
+  if (matchedTokens.length === 0 && !nameNorm.includes(queryNorm)) return -1;
 
   let score = 0;
 
@@ -29,8 +28,15 @@ function scoreExercise(
     score += 600_000;
   }
 
+  // Prefer complete phrase/token coverage over partial matches.
+  if (tokens.length > 0 && matchedTokens.length === tokens.length) {
+    score += 300_000;
+  } else {
+    score += matchedTokens.length * 75_000;
+  }
+
   let positionSum = 0;
-  for (const t of tokens) {
+  for (const t of matchedTokens) {
     const i = nameNorm.indexOf(t);
     positionSum += i;
     if (i === 0 || nameNorm[i - 1] === ' ') {

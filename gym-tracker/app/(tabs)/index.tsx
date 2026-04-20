@@ -26,6 +26,14 @@ import WorkoutKeyboard from '../../components/WorkoutKeyboard';
 const STORAGE_KEY = '@workout_logs';
 const SESSION_KEY = '@currentSessionId';
 const ROUTINES_STORAGE_KEY = '@routines';
+const CARDIO_TYPES: RoutineCardio["type"][] = [
+  "bike",
+  "treadmill",
+  "stair-master",
+  "elliptical",
+  "running",
+  "other",
+];
 
 const sessionCardioStorageKey = (sessionId: string) => `@session_cardio_${sessionId}`;
 
@@ -34,16 +42,33 @@ type SessionCardioPayload = {
   rows: RoutineCardio[];
 };
 
+function normalizeCardioType(raw: unknown): RoutineCardio["type"] {
+  const v = typeof raw === "string" ? raw.toLowerCase() : "";
+  return CARDIO_TYPES.includes(v as RoutineCardio["type"])
+    ? (v as RoutineCardio["type"])
+    : "other";
+}
+
+function normalizeCardioRow(row: any): RoutineCardio {
+  return {
+    id: String(row?.id ?? `cardio-${Date.now()}`),
+    type: normalizeCardioType(row?.type ?? row?.name),
+    duration: typeof row?.duration === "string" ? row.duration : "",
+    unit: row?.unit === "hr" ? "hr" : "min",
+    calories: typeof row?.calories === "string" ? row.calories : "",
+  };
+}
+
 function parseSessionCardioPayload(raw: string | null): SessionCardioPayload {
   if (!raw) return { routineTemplateId: null, rows: [] };
   try {
     const data = JSON.parse(raw);
     if (Array.isArray(data)) {
-      return { routineTemplateId: null, rows: data as RoutineCardio[] };
+      return { routineTemplateId: null, rows: data.map(normalizeCardioRow) };
     }
     return {
       routineTemplateId: data.routineTemplateId ?? null,
-      rows: Array.isArray(data.rows) ? data.rows : [],
+      rows: Array.isArray(data.rows) ? data.rows.map(normalizeCardioRow) : [],
     };
   } catch {
     return { routineTemplateId: null, rows: [] };
@@ -610,7 +635,7 @@ export default function TodayScreen() {
 
       console.log('Sets created successfully');
 
-      const cardioTpl = selectedRoutine.cardio ?? [];
+      const cardioTpl = (selectedRoutine.cardio ?? []).map(normalizeCardioRow);
       if (cardioTpl.length > 0) {
         const rows = cardioTpl.map((c) => ({ ...c }));
         const payload: SessionCardioPayload = {
@@ -725,13 +750,15 @@ export default function TodayScreen() {
 
   const updateSessionCardio = (
     index: number,
-    field: 'name' | 'duration' | 'unit',
+    field: 'type' | 'duration' | 'unit' | 'calories',
     value: string
   ) => {
     setSessionCardio((prev) => {
       const next = [...prev];
       if (field === 'unit') {
         next[index] = { ...next[index], unit: value === 'hr' ? 'hr' : 'min' };
+      } else if (field === "type") {
+        next[index] = { ...next[index], type: normalizeCardioType(value) };
       } else {
         next[index] = { ...next[index], [field]: value };
       }
@@ -1432,15 +1459,21 @@ export default function TodayScreen() {
                     styles.cardioSessionRow,
                     idx === sessionCardio.length - 1 && styles.cardioSessionRowLast,
                   ]}>
-                  <Text style={styles.cardioSessionName} numberOfLines={1}>
-                    {row.name || 'Cardio'}
-                  </Text>
+                  <Text style={styles.cardioSessionName} numberOfLines={1}>{row.type}</Text>
                   <View style={styles.cardioSessionInputs}>
                     <TextInput
                       style={styles.cardioSessionDurationInput}
                       value={row.duration}
                       onChangeText={(t) => updateSessionCardio(idx, 'duration', t)}
-                      placeholder="0"
+                      placeholder="Duration"
+                      placeholderTextColor="#444"
+                      keyboardType="numeric"
+                    />
+                    <TextInput
+                      style={styles.cardioSessionDurationInput}
+                      value={row.calories}
+                      onChangeText={(t) => updateSessionCardio(idx, 'calories', t)}
+                      placeholder="Calories"
                       placeholderTextColor="#444"
                       keyboardType="numeric"
                     />
@@ -1474,6 +1507,25 @@ export default function TodayScreen() {
                         </Text>
                       </TouchableOpacity>
                     </View>
+                  </View>
+                  <View style={styles.cardioSessionTypeGrid}>
+                    {CARDIO_TYPES.map((type) => (
+                      <TouchableOpacity
+                        key={type}
+                        style={[
+                          styles.cardioSessionTypeChip,
+                          row.type === type && styles.cardioSessionTypeChipActive,
+                        ]}
+                        onPress={() => updateSessionCardio(idx, "type", type)}>
+                        <Text
+                          style={[
+                            styles.cardioSessionTypeChipText,
+                            row.type === type && styles.cardioSessionTypeChipTextActive,
+                          ]}>
+                          {type}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
                   </View>
                 </View>
               ))}
@@ -1737,6 +1789,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    marginBottom: 8,
   },
   cardioSessionDurationInput: {
     flex: 1,
@@ -1770,6 +1823,31 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   cardioSessionUnitChipTextActive: {
+    color: '#FFFFFF',
+  },
+  cardioSessionTypeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  cardioSessionTypeChip: {
+    borderWidth: 1,
+    borderColor: '#333',
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#000000',
+  },
+  cardioSessionTypeChipActive: {
+    borderColor: '#0066CC',
+    backgroundColor: '#0066CC',
+  },
+  cardioSessionTypeChipText: {
+    color: '#888',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  cardioSessionTypeChipTextActive: {
     color: '#FFFFFF',
   },
   sectionTitle: {

@@ -19,6 +19,31 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 
 const STORAGE_KEY = '@routines';
+const CARDIO_TYPES: RoutineCardio["type"][] = [
+  "bike",
+  "treadmill",
+  "stair-master",
+  "elliptical",
+  "running",
+  "other",
+];
+
+function normalizeCardioType(raw: unknown): RoutineCardio["type"] {
+  const v = typeof raw === "string" ? raw.toLowerCase() : "";
+  return CARDIO_TYPES.includes(v as RoutineCardio["type"])
+    ? (v as RoutineCardio["type"])
+    : "other";
+}
+
+function normalizeCardioRow(row: any): RoutineCardio {
+  return {
+    id: String(row?.id ?? `cardio-${Date.now()}`),
+    type: normalizeCardioType(row?.type ?? row?.name),
+    duration: typeof row?.duration === "string" ? row.duration : "",
+    unit: row?.unit === "hr" ? "hr" : "min",
+    calories: typeof row?.calories === "string" ? row.calories : "",
+  };
+}
 
 // Routine Card Component with Edit and Delete
 const RoutineCard = ({ routine, onDelete, onUse, onEdit }) => {
@@ -101,9 +126,9 @@ const RoutineCard = ({ routine, onDelete, onUse, onEdit }) => {
               <Text style={styles.routineCardioTitle}>Cardio</Text>
               {routine.cardio!.map((c: RoutineCardio) => (
                 <View key={c.id} style={styles.routineCardioRow}>
-                  <Text style={styles.routineCardioName}>{c.name || 'Cardio'}</Text>
+                  <Text style={styles.routineCardioName}>{c.type}</Text>
                   <Text style={styles.routineCardioMeta}>
-                    {c.duration || '—'} {c.unit === 'hr' ? 'hr' : 'min'}
+                    {c.duration || '—'} {c.unit === 'hr' ? 'hr' : 'min'} · {c.calories || '—'} cal
                   </Text>
                 </View>
               ))}
@@ -151,7 +176,7 @@ const CreateEditRoutineModal = ({ visible, onClose, onSave, editingRoutine }) =>
       setSelectedExercises(editingRoutine.exercises);
       setCardioItems(
         editingRoutine.cardio && editingRoutine.cardio.length > 0
-          ? editingRoutine.cardio.map((c: RoutineCardio) => ({ ...c }))
+          ? editingRoutine.cardio.map((c: RoutineCardio) => normalizeCardioRow(c))
           : []
       );
     } else {
@@ -184,7 +209,7 @@ const CreateEditRoutineModal = ({ visible, onClose, onSave, editingRoutine }) =>
   const handleAddCardio = () => {
     setCardioItems([
       ...cardioItems,
-      { id: `cardio-${Date.now()}`, name: '', duration: '', unit: 'min' },
+      { id: `cardio-${Date.now()}`, type: "treadmill", duration: "", unit: "min", calories: "" },
     ]);
   };
 
@@ -194,12 +219,19 @@ const CreateEditRoutineModal = ({ visible, onClose, onSave, editingRoutine }) =>
 
   const handleUpdateCardio = (
     index: number,
-    field: 'name' | 'duration' | 'unit',
+    field: 'type' | 'duration' | 'unit' | 'calories',
     value: string
   ) => {
     const next = [...cardioItems];
-    if (field === 'unit') {
+    if (field === "unit") {
       next[index] = { ...next[index], unit: value === 'hr' ? 'hr' : 'min' };
+    } else if (field === "type") {
+      next[index] = {
+        ...next[index],
+        type: CARDIO_TYPES.includes(value as RoutineCardio["type"])
+          ? (value as RoutineCardio["type"])
+          : "other",
+      };
     } else {
       next[index] = { ...next[index], [field]: value };
     }
@@ -282,7 +314,7 @@ const CreateEditRoutineModal = ({ visible, onClose, onSave, editingRoutine }) =>
     }));
 
     const cleanedCardio = cardioItems.filter(
-      (c) => c.name.trim() !== '' || c.duration.trim() !== ''
+      (c) => c.duration.trim() !== '' || c.calories.trim() !== ''
     );
 
     const routineData: Routine = {
@@ -451,23 +483,43 @@ const CreateEditRoutineModal = ({ visible, onClose, onSave, editingRoutine }) =>
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Cardio (optional)</Text>
               <Text style={styles.cardioHint}>
-                Add activities like treadmill, bike, elypitical etc.
+                Select cardio type, plus duration and calories.
               </Text>
               {cardioItems.map((row, idx) => (
                 <View key={row.id} style={styles.cardioEditorRow}>
-                  <TextInput
-                    style={styles.cardioNameInput}
-                    value={row.name}
-                    onChangeText={(t) => handleUpdateCardio(idx, 'name', t)}
-                    placeholder="e.g. Treadmill"
-                    placeholderTextColor="#666"
-                  />
+                  <View style={styles.cardioTypeGrid}>
+                    {CARDIO_TYPES.map((type) => (
+                      <TouchableOpacity
+                        key={type}
+                        style={[
+                          styles.cardioTypeChip,
+                          row.type === type && styles.cardioTypeChipActive,
+                        ]}
+                        onPress={() => handleUpdateCardio(idx, "type", type)}>
+                        <Text
+                          style={[
+                            styles.cardioTypeChipText,
+                            row.type === type && styles.cardioTypeChipTextActive,
+                          ]}>
+                          {type}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                   <View style={styles.cardioDurationRow}>
                     <TextInput
                       style={styles.cardioDurationInput}
                       value={row.duration}
                       onChangeText={(t) => handleUpdateCardio(idx, 'duration', t)}
-                      placeholder="0"
+                      placeholder="Duration"
+                      placeholderTextColor="#444"
+                      keyboardType="numeric"
+                    />
+                    <TextInput
+                      style={styles.cardioDurationInput}
+                      value={row.calories}
+                      onChangeText={(t) => handleUpdateCardio(idx, 'calories', t)}
+                      placeholder="Calories"
                       placeholderTextColor="#444"
                       keyboardType="numeric"
                     />
@@ -1174,15 +1226,31 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#333',
   },
-  cardioNameInput: {
-    backgroundColor: '#000',
-    borderRadius: 6,
-    padding: 10,
-    color: '#FFFFFF',
-    fontSize: 15,
-    borderWidth: 1,
-    borderColor: '#333',
+  cardioTypeGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
     marginBottom: 8,
+  },
+  cardioTypeChip: {
+    borderWidth: 1,
+    borderColor: "#333",
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "#000",
+  },
+  cardioTypeChipActive: {
+    borderColor: "#0066CC",
+    backgroundColor: "#0066CC",
+  },
+  cardioTypeChipText: {
+    color: "#888",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  cardioTypeChipTextActive: {
+    color: "#FFFFFF",
   },
   cardioDurationRow: {
     flexDirection: 'row',

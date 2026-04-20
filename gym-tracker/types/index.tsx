@@ -33,9 +33,10 @@ export interface RoutineExercise {
 /** Optional cardio slots on a routine; duration is the last template / “previous” value. */
 export interface RoutineCardio {
   id: string;
-  name: string;
+  type: "bike" | "treadmill" | "stair-master" | "elliptical" | "running" | "other";
   duration: string;
   unit: 'min' | 'hr';
+  calories: string;
 }
 
 export interface Routine {

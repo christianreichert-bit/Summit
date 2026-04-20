@@ -11,15 +11,11 @@ import {
   clearSessionOrigin,
 } from "./offlineQueue";
 
-<<<<<<< HEAD
 export const isOnline = isSupabaseConfigured;
-=======
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
-// isOnline = Supabase is configured (build-time check)
-export const isOnline = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
->>>>>>> d6aacdf3d828b85aa6f0126dd052bf3556665580
+
 
 // useSupabase = Supabase configured AND network available (runtime check)
 const useSupabase = () => isOnline && networkStatus.isConnected;

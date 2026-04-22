@@ -3,6 +3,7 @@ import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollVie
 import { useRouter } from "expo-router";
 import { supabase } from "./backend/supabaseClient";
 import exercisesData from "../assets/data/exercises.json";
+import { searchExercisesByName } from "./utils/exerciseSearch";
 
 export default function TestScreen() {
   const router = useRouter();
@@ -33,9 +34,10 @@ export default function TestScreen() {
   const [editWeight, setEditWeight] = useState("");
   const [editWarmup, setEditWarmup] = useState(false);
 
-  const filteredExercises = exercisesData.filter(
-    (ex) => ex.name && ex.name.toLowerCase().includes(exerciseSearch.toLowerCase())
-  );
+  const filteredExercises =
+    exerciseSearch.trim().length === 0
+      ? []
+      : searchExercisesByName(exercisesData, exerciseSearch, 500);
 
   // --- Users ---
   const loadUsers = async () => {

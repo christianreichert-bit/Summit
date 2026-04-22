@@ -1,5 +1,6 @@
 // components/ExerciseSearchModal.tsx
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { searchExercisesByName } from '../app/utils/exerciseSearch';
 import {
   Modal,
   View,
@@ -33,14 +34,13 @@ export default function ExerciseSearchModal({
 }: ExerciseSearchModalProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
-  const filteredExercises =
-    searchQuery.length > 0
-      ? (exercisesData as ExerciseItem[])
-          .filter((ex) =>
-            ex.name.toLowerCase().includes(searchQuery.toLowerCase())
-          )
-          .slice(0, 25)
-      : [];
+  const filteredExercises = useMemo(
+    () =>
+      searchQuery.trim().length > 0
+        ? searchExercisesByName(exercisesData as ExerciseItem[], searchQuery, 25)
+        : [],
+    [searchQuery]
+  );
 
   const handleSelect = (exercise: ExerciseItem) => {
     onSelect(exercise);
@@ -102,7 +102,7 @@ export default function ExerciseSearchModal({
             )}
             ListEmptyComponent={
               <Text style={styles.emptyText}>
-                {searchQuery.length > 0
+                {searchQuery.trim().length > 0
                   ? 'No exercises found'
                   : 'Type to search exercises'}
               </Text>

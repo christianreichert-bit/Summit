@@ -1,6 +1,7 @@
 import { memo, useState } from "react";
-import { Alert, Modal, Pressable, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Image, Modal, Pressable, Share, StyleSheet, Text, View } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useRouter } from "expo-router";
 import { db } from "../backend/db";
 import { useTheme } from "../theme/ThemeContext";
 import { useUnits } from "../utils/units";
@@ -14,9 +15,10 @@ type WorkoutHistoryCardProps = {
   exerciseCount: number;
   totalVolume: number;
   notes: string | null;
+  photo_url?: string | null;
   exerciseNames?: string[];
   onDelete?: (sessionId: number) => void;
-  onEdit?: (sessionId: number, name: string, notes: string | null) => void;
+  onEditWorkout?: (sessionId: number) => void;
 };
 
 function fullDate(dateStr: string): string {
@@ -61,18 +63,16 @@ const WorkoutHistoryCard = memo(function WorkoutHistoryCard({
   exerciseCount,
   totalVolume,
   notes,
+  photo_url,
   exerciseNames = [],
   onDelete,
-  onEdit,
+  onEditWorkout,
 }: WorkoutHistoryCardProps) {
   const { colors } = useTheme();
   const { toDisplay, label: unitLabel } = useUnits();
+  const router = useRouter();
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editName, setEditName] = useState(sessionName);
-  const [editNotes, setEditNotes] = useState(notes ?? "");
-  const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const duration = parseDuration(sessionDate, startTime, endTime);
@@ -95,28 +95,12 @@ const WorkoutHistoryCard = memo(function WorkoutHistoryCard({
   };
 
   const handleEditOpen = () => {
-    setEditName(sessionName);
-    setEditNotes(notes ?? "");
     setMenuOpen(false);
-    setEditOpen(true);
-  };
-
-  const handleEditSave = async () => {
-    const trimmedName = editName.trim();
-    if (!trimmedName) return;
-    setSaving(true);
-    const trimmedNotes = editNotes.trim();
-    const { error } = await db.updateWorkoutSession(session_id, {
-      session_name: trimmedName,
-      notes: trimmedNotes || undefined,
-    });
-    setSaving(false);
-    if (error) {
-      Alert.alert("Error", (error as any).message ?? "Failed to save changes");
-      return;
+    if (onEditWorkout) {
+      onEditWorkout(session_id);
+    } else {
+      router.push(`/workout-edit/${session_id}` as any);
     }
-    setEditOpen(false);
-    onEdit?.(session_id, trimmedName, trimmedNotes || null);
   };
 
   const handleDelete = () => {
@@ -202,6 +186,10 @@ const WorkoutHistoryCard = memo(function WorkoutHistoryCard({
         <Text style={[styles.notes, { color: colors.textTertiary }]} numberOfLines={2}>{notes}</Text>
       ) : null}
 
+      {photo_url ? (
+        <Image source={{ uri: photo_url }} style={styles.progressPhoto} resizeMode="cover" />
+      ) : null}
+
       {/* ── Action sheet ── */}
       <Modal visible={menuOpen} transparent animationType="slide" onRequestClose={() => setMenuOpen(false)}>
         <Pressable style={styles.overlay} onPress={() => setMenuOpen(false)}>
@@ -250,55 +238,6 @@ const WorkoutHistoryCard = memo(function WorkoutHistoryCard({
           </Pressable>
         </Pressable>
       </Modal>
-
-      {/* ── Edit modal ── */}
-      <Modal visible={editOpen} transparent animationType="fade" onRequestClose={() => setEditOpen(false)}>
-        <Pressable style={styles.overlay} onPress={() => setEditOpen(false)}>
-          <Pressable style={[styles.editCard, { backgroundColor: colors.surface }]} onPress={() => {}}>
-            <Text style={[styles.editTitle, { color: colors.text }]}>Edit Workout</Text>
-
-            <Text style={[styles.editLabel, { color: colors.textSecondary }]}>Name</Text>
-            <TextInput
-              style={[styles.editInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.inputBackground }]}
-              value={editName}
-              onChangeText={setEditName}
-              placeholder="Workout name"
-              placeholderTextColor={colors.textTertiary}
-              maxLength={80}
-              autoFocus
-            />
-
-            <Text style={[styles.editLabel, { color: colors.textSecondary }]}>Notes</Text>
-            <TextInput
-              style={[styles.editInput, styles.editTextArea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.inputBackground }]}
-              value={editNotes}
-              onChangeText={setEditNotes}
-              placeholder="Add notes (optional)"
-              placeholderTextColor={colors.textTertiary}
-              multiline
-              maxLength={500}
-            />
-
-            <View style={styles.editButtons}>
-              <Pressable
-                style={[styles.editBtn, { backgroundColor: colors.surfaceSecondary }]}
-                onPress={() => setEditOpen(false)}
-              >
-                <Text style={{ fontSize: 15, fontWeight: "600", color: colors.text }}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.editBtn, { backgroundColor: colors.primary, opacity: saving ? 0.6 : 1 }]}
-                onPress={handleEditSave}
-                disabled={saving}
-              >
-                <Text style={{ fontSize: 15, fontWeight: "700", color: "#fff" }}>
-                  {saving ? "Saving…" : "Save"}
-                </Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
     </View>
   );
 });
@@ -329,6 +268,13 @@ const styles = StyleSheet.create({
   exerciseName: { fontSize: 13 },
   moreText: { fontSize: 12, marginTop: 2 },
   notes: { fontSize: 12, fontStyle: "italic", marginTop: 6 },
+  progressPhoto: {
+    width: "100%",
+    height: 220,
+    borderRadius: 10,
+    marginTop: 10,
+    overflow: "hidden",
+  },
 
   // Action sheet
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
@@ -346,20 +292,4 @@ const styles = StyleSheet.create({
     borderRadius: 12, alignItems: "center",
   },
   sheetCancelText: { fontSize: 16, fontWeight: "600" },
-
-  // Edit modal
-  editCard: {
-    marginHorizontal: 20, borderRadius: 16, padding: 20,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.25, shadowRadius: 16, elevation: 10,
-  },
-  editTitle: { fontSize: 18, fontWeight: "700", marginBottom: 16 },
-  editLabel: { fontSize: 13, fontWeight: "600", marginBottom: 6 },
-  editInput: {
-    borderWidth: 1, borderRadius: 10, paddingHorizontal: 12,
-    paddingVertical: 10, fontSize: 15, marginBottom: 14,
-  },
-  editTextArea: { height: 88, textAlignVertical: "top" },
-  editButtons: { flexDirection: "row", gap: 10, marginTop: 4 },
-  editBtn: { flex: 1, paddingVertical: 13, borderRadius: 10, alignItems: "center" },
 });

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useTheme } from "../theme/ThemeContext";
 import exercisesData from "../../assets/data/exercises.json";
 import { db } from "../backend/db";
+import { searchExercisesByName } from "../utils/exerciseSearch";
 
 type Exercise = {
   id: string;
@@ -54,11 +55,10 @@ export default function ExercisePicker({ visible, onSelect, onClose }: Props) {
     ...(exercisesData as Exercise[]),
   ];
 
-  const filtered = search.length === 0
-    ? []
-    : allExercises.filter(
-        (ex) => ex.name && ex.name.toLowerCase().includes(search.toLowerCase())
-      );
+  const filtered =
+    search.trim().length === 0
+      ? []
+      : searchExercisesByName(allExercises, search, 500);
 
   const handleClose = () => {
     setSearch("");

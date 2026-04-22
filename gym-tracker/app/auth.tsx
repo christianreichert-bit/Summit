@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { db } from "./backend/db";
 import { useTheme } from "./theme/ThemeContext";
 
@@ -17,27 +18,32 @@ export default function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const [resetCooldown, setResetCooldown] = useState(0);
 
-  useEffect(() => {
-    const result = db.onAuthStateChange((event: string) => {
-      if (event === "PASSWORD_RECOVERY") {
-        setMode("resetPassword");
-        setError(null);
-        setInfo("Enter your new password below.");
-      }
-    });
+  const syncStoredUserId = async () => {
+    const result = await db.getUser();
+    if ("error" in result && result.error) {
+      return;
+    }
 
-    const subscription = result?.data?.subscription;
-    return () => {
-      if (subscription?.unsubscribe) {
-        subscription.unsubscribe();
-      }
-    };
+    const currentUserId: string | undefined = result.data?.user?.id;
+    console.log("Current user ID from DB:", currentUserId);
+    if (currentUserId) {
+      console.log("Storing user ID in AsyncStorage:", currentUserId);
+      await AsyncStorage.setItem("userId", currentUserId);
+      const testUserId = await AsyncStorage.getItem("userId");
+      console.log("Verified stored user ID from AsyncStorage:", testUserId);
+    }
+  };
+
+  useEffect(() => {
+    syncStoredUserId().catch((syncError) => {
+      console.error("Failed to sync stored user id:", syncError);
+    });
   }, []);
 
   useEffect(() => {
     if (resetCooldown <= 0) return;
     const timer = setInterval(() => {
-      setResetCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+      setResetCooldown((prev) => Math.max(0, prev - 1));
     }, 1000);
     return () => clearInterval(timer);
   }, [resetCooldown]);
@@ -104,6 +110,7 @@ export default function AuthScreen() {
           return;
         }
       }
+      await syncStoredUserId();
       router.replace("/(tabs)");
     } finally {
       setLoading(false);

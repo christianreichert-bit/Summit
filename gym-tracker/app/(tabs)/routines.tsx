@@ -14,14 +14,54 @@ import {
   Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Routine, RoutineExercise } from '../../types';
+import { Routine, RoutineCardio, RoutineExercise } from '../../types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
+import { supabase } from '../backend/supabaseClient';
 
 const STORAGE_KEY = '@routines';
+const CARDIO_TYPES: RoutineCardio["type"][] = [
+  "bike",
+  "treadmill",
+  "stair-master",
+  "elliptical",
+  "running",
+  "other",
+];
+
+function normalizeCardioType(raw: unknown): RoutineCardio["type"] {
+  const v = typeof raw === "string" ? raw.toLowerCase() : "";
+  return CARDIO_TYPES.includes(v as RoutineCardio["type"])
+    ? (v as RoutineCardio["type"])
+    : "other";
+}
+
+function normalizeCardioRow(row: any): RoutineCardio {
+  return {
+    id: String(row?.id ?? `cardio-${Date.now()}`),
+    type: normalizeCardioType(row?.type ?? row?.name),
+    duration: typeof row?.duration === "string" ? row.duration : "",
+    unit: row?.unit === "hr" ? "hr" : "min",
+    calories: typeof row?.calories === "string" ? row.calories : "",
+  };
+}
+
+type RoutineCardProps = {
+  routine: Routine;
+  onDelete: (routineId: string) => void;
+  onUse: (routine: Routine) => void;
+  onEdit: (routine: Routine) => void;
+};
+
+type CreateEditRoutineModalProps = {
+  visible: boolean;
+  onClose: () => void;
+  onSave: (routine: Routine) => void | Promise<void>;
+  editingRoutine: Routine | null;
+};
 
 // Routine Card Component with Edit and Delete
-const RoutineCard = ({ routine, onDelete, onUse, onEdit }) => {
+const RoutineCard = ({ routine, onDelete, onUse, onEdit }: RoutineCardProps) => {
   const [expanded, setExpanded] = useState(false);
 
   const handleDelete = () => {
@@ -44,7 +84,10 @@ const RoutineCard = ({ routine, onDelete, onUse, onEdit }) => {
           </View>
         </TouchableOpacity>
         <View style={styles.routineHeaderRight}>
-          <Text style={styles.exerciseCount}>{routine.exercises.length} exercises</Text>
+          <Text style={styles.exerciseCount}>
+            {routine.exercises.length} exercises
+            {(routine.cardio?.length ?? 0) > 0 ? ` · ${routine.cardio!.length} cardio` : ''}
+          </Text>
           <View style={styles.actionButtons}>
             <TouchableOpacity onPress={() => onEdit(routine)} style={styles.editButton}>
               <Text style={styles.editButtonText}>✎</Text>
@@ -93,17 +136,48 @@ const RoutineCard = ({ routine, onDelete, onUse, onEdit }) => {
               )}
             </View>
           ))}
+          {(routine.cardio?.length ?? 0) > 0 && (
+            <View style={styles.routineCardioBlock}>
+              <Text style={styles.routineCardioTitle}>Cardio</Text>
+              {routine.cardio!.map((c: RoutineCardio) => (
+                <View key={c.id} style={styles.routineCardioRow}>
+                  <Text style={styles.routineCardioName}>{c.type}</Text>
+                  <Text style={styles.routineCardioMeta}>
+                    {c.duration || '—'} {c.unit === 'hr' ? 'hr' : 'min'} · {c.calories || '—'} cal
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
       )}
     </View>
   );
 };
+
+const MAX_ROUTINE_WEIGHT_LBS = 1500;
+
+function clampRoutineWeightInput(text: string): string {
+  if (text === '') return '';
+  let t = text.replace(/[^\d.]/g, '');
+  const firstDot = t.indexOf('.');
+  if (firstDot !== -1) {
+    t = t.slice(0, firstDot + 1) + t.slice(firstDot + 1).replace(/\./g, '');
+  }
+  if (t === '' || t === '.') return t;
+  const n = parseFloat(t);
+  if (Number.isNaN(n)) return t;
+  if (n > MAX_ROUTINE_WEIGHT_LBS) return String(MAX_ROUTINE_WEIGHT_LBS);
+  return t;
+}
+
 // Create/Edit Routine Modal
-const CreateEditRoutineModal = ({ visible, onClose, onSave, editingRoutine }) => {
+const CreateEditRoutineModal = ({ visible, onClose, onSave, editingRoutine }: CreateEditRoutineModalProps) => {
   const [routineName, setRoutineName] = useState('');
   const [selectedDay, setSelectedDay] = useState<'Push' | 'Pull' | 'Legs' | 'Custom'>('Push');
   const [customDayName, setCustomDayName] = useState('');
   const [selectedExercises, setSelectedExercises] = useState<RoutineExercise[]>([]);
+  const [cardioItems, setCardioItems] = useState<RoutineCardio[]>([]);
   const [showSearchModal, setShowSearchModal] = useState(false);
 
   const days: ('Push' | 'Pull' | 'Legs' | 'Custom')[] = ['Push', 'Pull', 'Legs', 'Custom'];
@@ -115,6 +189,11 @@ const CreateEditRoutineModal = ({ visible, onClose, onSave, editingRoutine }) =>
       setSelectedDay(editingRoutine.day);
       setCustomDayName(editingRoutine.customDayName || '');
       setSelectedExercises(editingRoutine.exercises);
+      setCardioItems(
+        editingRoutine.cardio && editingRoutine.cardio.length > 0
+          ? editingRoutine.cardio.map((c: RoutineCardio) => normalizeCardioRow(c))
+          : []
+      );
     } else {
       resetForm();
     }
@@ -141,14 +220,47 @@ const CreateEditRoutineModal = ({ visible, onClose, onSave, editingRoutine }) =>
   const handleRemoveExercise = (index: number) => {
     setSelectedExercises(selectedExercises.filter((_, i) => i !== index));
   };
-  
+
+  const handleAddCardio = () => {
+    setCardioItems([
+      ...cardioItems,
+      { id: `cardio-${Date.now()}`, type: "treadmill", duration: "", unit: "min", calories: "" },
+    ]);
+  };
+
+  const handleRemoveCardio = (index: number) => {
+    setCardioItems(cardioItems.filter((_, i) => i !== index));
+  };
+
+  const handleUpdateCardio = (
+    index: number,
+    field: 'type' | 'duration' | 'unit' | 'calories',
+    value: string
+  ) => {
+    const next = [...cardioItems];
+    if (field === "unit") {
+      next[index] = { ...next[index], unit: value === 'hr' ? 'hr' : 'min' };
+    } else if (field === "type") {
+      next[index] = {
+        ...next[index],
+        type: CARDIO_TYPES.includes(value as RoutineCardio["type"])
+          ? (value as RoutineCardio["type"])
+          : "other",
+      };
+    } else {
+      next[index] = { ...next[index], [field]: value };
+    }
+    setCardioItems(next);
+  };
+
   const handleUpdateSet = (exerciseIndex: number, setNumber: number, field: 'reps' | 'weight', value: string) => {
+    const nextValue = field === 'weight' ? clampRoutineWeightInput(value) : value;
     const updated = [...selectedExercises];
     const exercise = updated[exerciseIndex];
     if (exercise.sets) {
       const setIndex = exercise.sets.findIndex(s => s.setNumber === setNumber);
       if (setIndex !== -1) {
-        exercise.sets[setIndex] = { ...exercise.sets[setIndex], [field]: value };
+        exercise.sets[setIndex] = { ...exercise.sets[setIndex], [field]: nextValue };
       }
     }
     setSelectedExercises(updated);
@@ -190,6 +302,7 @@ const CreateEditRoutineModal = ({ visible, onClose, onSave, editingRoutine }) =>
     setSelectedDay('Push');
     setCustomDayName('');
     setSelectedExercises([]);
+    setCardioItems([]);
   };
 
   const handleSave = () => {
@@ -215,12 +328,17 @@ const CreateEditRoutineModal = ({ visible, onClose, onSave, editingRoutine }) =>
       })),
     }));
 
+    const cleanedCardio = cardioItems.filter(
+      (c) => c.duration.trim() !== '' || c.calories.trim() !== ''
+    );
+
     const routineData: Routine = {
       id: editingRoutine ? editingRoutine.id : Date.now().toString(),
       name: routineName.trim(),
       day: selectedDay,
       customDayName: selectedDay === 'Custom' ? customDayName.trim() : undefined,
       exercises: exercisesWithSets,
+      cardio: cleanedCardio.length > 0 ? cleanedCardio : undefined,
       createdAt: editingRoutine ? editingRoutine.createdAt : new Date(),
     };
 
@@ -376,6 +494,93 @@ const CreateEditRoutineModal = ({ visible, onClose, onSave, editingRoutine }) =>
                 ))}
               </View>
             )}
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Cardio (optional)</Text>
+              <Text style={styles.cardioHint}>
+                Select cardio type, plus duration and calories.
+              </Text>
+              {cardioItems.map((row, idx) => (
+                <View key={row.id} style={styles.cardioEditorRow}>
+                  <View style={styles.cardioTypeGrid}>
+                    {CARDIO_TYPES.map((type) => (
+                      <TouchableOpacity
+                        key={type}
+                        style={[
+                          styles.cardioTypeChip,
+                          row.type === type && styles.cardioTypeChipActive,
+                        ]}
+                        onPress={() => handleUpdateCardio(idx, "type", type)}>
+                        <Text
+                          style={[
+                            styles.cardioTypeChipText,
+                            row.type === type && styles.cardioTypeChipTextActive,
+                          ]}>
+                          {type}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <View style={styles.cardioDurationRow}>
+                    <TextInput
+                      style={styles.cardioDurationInput}
+                      value={row.duration}
+                      onChangeText={(t) => handleUpdateCardio(idx, 'duration', t)}
+                      placeholder="Duration"
+                      placeholderTextColor="#444"
+                      keyboardType="numeric"
+                    />
+                    <TextInput
+                      style={styles.cardioDurationInput}
+                      value={row.calories}
+                      onChangeText={(t) => handleUpdateCardio(idx, 'calories', t)}
+                      placeholder="Calories"
+                      placeholderTextColor="#444"
+                      keyboardType="numeric"
+                    />
+                    <View style={styles.cardioUnitToggle}>
+                      <TouchableOpacity
+                        style={[
+                          styles.cardioUnitChip,
+                          row.unit === 'min' && styles.cardioUnitChipActive,
+                        ]}
+                        onPress={() => handleUpdateCardio(idx, 'unit', 'min')}>
+                        <Text
+                          style={[
+                            styles.cardioUnitChipText,
+                            row.unit === 'min' && styles.cardioUnitChipTextActive,
+                          ]}>
+                          min
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.cardioUnitChip,
+                          row.unit === 'hr' && styles.cardioUnitChipActive,
+                        ]}
+                        onPress={() => handleUpdateCardio(idx, 'unit', 'hr')}>
+                        <Text
+                          style={[
+                            styles.cardioUnitChipText,
+                            row.unit === 'hr' && styles.cardioUnitChipTextActive,
+                          ]}>
+                          hr
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.cardioRemoveBtn}
+                      onPress={() => handleRemoveCardio(idx)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Text style={styles.cardioRemoveBtnText}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+              <TouchableOpacity style={styles.addCardioButton} onPress={handleAddCardio}>
+                <Text style={styles.addCardioButtonText}>+ Add cardio</Text>
+              </TouchableOpacity>
+            </View>
           </ScrollView>
 
           <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
@@ -404,6 +609,11 @@ export default function RoutinesScreen() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingRoutine, setEditingRoutine] = useState<Routine | null>(null);
 
+  const getRoutineDescription = (routine: Routine) => {
+    const dayLabel = routine.day === 'Custom' ? routine.customDayName || 'Custom' : routine.day;
+    return `${dayLabel} • ${routine.exercises.length} exercises`;
+  };
+
   useEffect(() => {
     loadRoutines();
   }, []);
@@ -428,9 +638,41 @@ export default function RoutinesScreen() {
     }
   };
 
-  const handleCreateRoutine = (newRoutine: Routine) => {
-    const updated = [...routines, newRoutine];
-    saveRoutines(updated);
+  const handleCreateRoutine = async (newRoutine: Routine) => {
+    let routineToPersist = newRoutine;
+
+    try {
+      const userId = await AsyncStorage.getItem('userId');
+      if (userId) {
+        const { data, error } = await supabase
+          .from('routines')
+          .insert({
+            routine_name: newRoutine.name,
+            description: getRoutineDescription(newRoutine),
+            created_at: newRoutine.createdAt instanceof Date
+              ? newRoutine.createdAt.toISOString()
+              : new Date(newRoutine.createdAt).toISOString(),
+            user_id: userId,
+          })
+          .select('routine_id')
+          .single();
+
+        if (error) throw error;
+
+        if (data?.routine_id != null) {
+          routineToPersist = {
+            ...newRoutine,
+            id: String(data.routine_id),
+          };
+        }
+      }
+    } catch (error) {
+      console.error('Failed to save routine to DB:', error);
+      Alert.alert('Sync Warning', 'Routine saved locally, but failed to sync to the database.');
+    }
+
+    const updated = [...routines, routineToPersist];
+    await saveRoutines(updated);
     setShowCreateModal(false);
     setEditingRoutine(null);
   };
@@ -440,19 +682,52 @@ export default function RoutinesScreen() {
     setShowCreateModal(true);
   };
 
-  const handleUpdateRoutine = (updatedRoutine: Routine) => {
+  const handleUpdateRoutine = async (updatedRoutine: Routine) => {
+    try {
+      const routineId = Number.parseInt(updatedRoutine.id, 10);
+      if (Number.isFinite(routineId)) {
+        const { error } = await supabase
+          .from('routines')
+          .update({
+            routine_name: updatedRoutine.name,
+            description: getRoutineDescription(updatedRoutine),
+          })
+          .eq('routine_id', routineId);
+
+        if (error) throw error;
+      }
+    } catch (error) {
+      console.error('Failed to update routine in DB:', error);
+      Alert.alert('Sync Warning', 'Routine updated locally, but failed to sync update to the database.');
+    }
+
     const updated = routines.map(r => 
       r.id === updatedRoutine.id ? updatedRoutine : r
     );
-    saveRoutines(updated);
+    await saveRoutines(updated);
     setShowCreateModal(false);
     setEditingRoutine(null);
   };
 
   const handleDeleteRoutine = (routineId: string) => {
-    const performDelete = () => {
+    const performDelete = async () => {
+      try {
+        const parsedRoutineId = Number.parseInt(routineId, 10);
+        if (Number.isFinite(parsedRoutineId)) {
+          const { error } = await supabase
+            .from('routines')
+            .delete()
+            .eq('routine_id', parsedRoutineId);
+
+          if (error) throw error;
+        }
+      } catch (error) {
+        console.error('Failed to delete routine in DB:', error);
+        Alert.alert('Sync Warning', 'Routine deleted locally, but failed to sync delete to the database.');
+      }
+
       const updated = routines.filter((r) => r.id !== routineId);
-      saveRoutines(updated);
+      await saveRoutines(updated);
     };
 
     // react-native-web's Alert.alert with multiple buttons is unreliable: the dialog
@@ -747,6 +1022,35 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 4,
   },
+  routineCardioBlock: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+  },
+  routineCardioTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0066CC',
+    marginBottom: 8,
+  },
+  routineCardioRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A2A2A',
+  },
+  routineCardioName: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    flex: 1,
+  },
+  routineCardioMeta: {
+    fontSize: 13,
+    color: '#888',
+  },
   emptyState: {
     padding: 40,
     alignItems: 'center',
@@ -992,6 +1296,103 @@ const styles = StyleSheet.create({
   removeIcon: {
     color: '#0066CC',
     fontSize: 20,
+  },
+  cardioHint: {
+    fontSize: 12,
+    color: '#888',
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  cardioEditorRow: {
+    backgroundColor: '#111',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  cardioTypeGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 8,
+  },
+  cardioTypeChip: {
+    borderWidth: 1,
+    borderColor: "#333",
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "#000",
+  },
+  cardioTypeChipActive: {
+    borderColor: "#0066CC",
+    backgroundColor: "#0066CC",
+  },
+  cardioTypeChipText: {
+    color: "#888",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  cardioTypeChipTextActive: {
+    color: "#FFFFFF",
+  },
+  cardioDurationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cardioDurationInput: {
+    flex: 1,
+    backgroundColor: '#000',
+    borderRadius: 6,
+    padding: 10,
+    color: '#FFFFFF',
+    fontSize: 15,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  cardioUnitToggle: {
+    flexDirection: 'row',
+    borderRadius: 6,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  cardioUnitChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#000',
+  },
+  cardioUnitChipActive: {
+    backgroundColor: '#0066CC',
+  },
+  cardioUnitChipText: {
+    color: '#888',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  cardioUnitChipTextActive: {
+    color: '#FFFFFF',
+  },
+  cardioRemoveBtn: {
+    padding: 8,
+  },
+  cardioRemoveBtnText: {
+    color: '#888',
+    fontSize: 16,
+  },
+  addCardioButton: {
+    borderWidth: 1,
+    borderColor: '#0066CC',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+  },
+  addCardioButtonText: {
+    color: '#0066CC',
+    fontSize: 15,
+    fontWeight: '600',
   },
   saveButton: {
     backgroundColor: '#0066CC',

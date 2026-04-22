@@ -1,12 +1,29 @@
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import { localDb } from "./localDb";
+import { networkStatus } from "./networkStatus";
+import {
+  enqueuePendingSession,
+  getPendingQueue,
+  removeFromQueue,
+  getPendingCount,
+  markSessionOrigin,
+  getSessionOrigin,
+  clearSessionOrigin,
+} from "./offlineQueue";
 
 export const isOnline = isSupabaseConfigured;
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+
+
+// useSupabase = Supabase configured AND network available (runtime check)
+const useSupabase = () => isOnline && networkStatus.isConnected;
 
 export const db = {
   // Auth
   signUp: async (email: string, password: string, username: string) => {
-    if (isOnline) {
+    if (useSupabase()) {
       const { data, error: signUpError } = await supabase.auth.signUp({ email, password });
       if (signUpError) return { data: null, error: signUpError };
       if (data.user) {
@@ -24,7 +41,7 @@ export const db = {
   },
 
   signIn: async (email: string, password: string) => {
-    if (isOnline) {
+    if (useSupabase()) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       return { error };
     }
@@ -39,7 +56,7 @@ export const db = {
   },
 
   signOut: async () => {
-    if (isOnline) {
+    if (useSupabase()) {
       await supabase.auth.signOut();
     } else {
       await localDb.signOut();
@@ -47,42 +64,64 @@ export const db = {
   },
 
   getSession: async () => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.auth.getSession();
     }
     return localDb.getSession();
   },
 
   getUser: async () => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.auth.getUser();
     }
     return localDb.getUser();
   },
 
   getUserProfile: async (userId: string) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("users").select("*").eq("user_id", userId).single();
     }
     return localDb.getUserProfile(userId);
   },
 
-  updateUserProfile: async (userId: string, updates: { username: string }) => {
-    if (isOnline) {
+  updateUserProfile: async (userId: string, updates: { username?: string; bio?: string | null; avatar_url?: string | null }) => {
+    if (useSupabase()) {
       return supabase.from("users").update(updates).eq("user_id", userId);
     }
     return localDb.updateUserProfile(userId, updates);
   },
 
+  uploadAvatar: async (userId: string, uri: string): Promise<{ url: string | null; error: string | null }> => {
+    if (!useSupabase()) return { url: null, error: "Requires internet connection" };
+    try {
+      const ext = (uri.split(".").pop()?.split("?")[0]?.toLowerCase()) ?? "jpg";
+      const mimeType = ext === "png" ? "image/png" : ext === "gif" ? "image/gif" : "image/jpeg";
+      const path = `${userId}/avatar.${ext}`;
+      // Use FormData instead of fetch().blob() — fetch() on local file:// / content://
+      // URIs is unreliable on Android and often returns an empty blob.
+      const formData = new FormData();
+      formData.append("file", { uri, name: `avatar.${ext}`, type: mimeType } as any);
+      const { error: uploadError } = await supabase.storage
+        .from("avatars")
+        .upload(path, formData, { upsert: true, contentType: mimeType });
+      if (uploadError) return { url: null, error: uploadError.message };
+      const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+      // Bust cache by appending a timestamp
+      return { url: `${data.publicUrl}?t=${Date.now()}`, error: null };
+    } catch (e: any) {
+      return { url: null, error: e.message ?? "Upload failed" };
+    }
+  },
+
   changePassword: async (newPassword: string) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.auth.updateUser({ password: newPassword });
     }
     return { data: null, error: { message: "Password changes require an internet connection." } };
   },
 
   onAuthStateChange: (callback: (event: string, session: any) => void) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.auth.onAuthStateChange(callback);
     }
     return localDb.onAuthStateChange(callback);
@@ -90,7 +129,7 @@ export const db = {
 
   // Users
   getUsers: async () => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("users").select("*");
     }
     return localDb.getUsers();
@@ -98,21 +137,28 @@ export const db = {
 
   // Routines
   getRoutines: async () => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("routines").select("*");
     }
     return localDb.getRoutines();
   },
 
   insertRoutine: async (routine: { routine_name: string; description: string | null; user_id: string }) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("routines").insert(routine);
     }
     return localDb.insertRoutine(routine);
   },
 
+  updateRoutine: async (routineId: number, updates: { routine_name?: string; description?: string | null; routine_order?: number }) => {
+    if (useSupabase()) {
+      return supabase.from("routines").update(updates).eq("routine_id", routineId);
+    }
+    return localDb.updateRoutine(routineId, updates);
+  },
+
   deleteRoutine: async (routineId: number) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("routines").delete().eq("routine_id", routineId);
     }
     return localDb.deleteRoutine(routineId);
@@ -120,7 +166,7 @@ export const db = {
 
   // Routine Exercises
   getRoutineExercises: async (routineId: number) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase
         .from("routine_exercises")
         .select("*")
@@ -136,22 +182,29 @@ export const db = {
     exercise_name: string;
     exercise_order: number;
   }) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("routine_exercises").insert(exercise);
     }
     return localDb.insertRoutineExercise(exercise);
   },
 
   deleteRoutineExercise: async (routineExerciseId: number) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("routine_exercises").delete().eq("routine_exercise_id", routineExerciseId);
     }
     return localDb.deleteRoutineExercise(routineExerciseId);
   },
 
+  updateRoutineExercise: async (routineExerciseId: number, updates: { exercise_id?: string; exercise_name?: string }) => {
+    if (useSupabase()) {
+      return supabase.from("routine_exercises").update(updates).eq("routine_exercise_id", routineExerciseId);
+    }
+    return localDb.updateRoutineExercise(routineExerciseId, updates);
+  },
+
   // Routine Exercise Sets (template sets)
   getRoutineExerciseSets: async (routineExerciseId: number) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase
         .from("routine_exercise_sets")
         .select("*")
@@ -168,14 +221,14 @@ export const db = {
     target_reps: number | null;
     is_warmup: boolean;
   }) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("routine_exercise_sets").insert(set);
     }
     return localDb.insertRoutineExerciseSet(set);
   },
 
   deleteRoutineExerciseSet: async (routineSetId: number) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("routine_exercise_sets").delete().eq("routine_set_id", routineSetId);
     }
     return localDb.deleteRoutineExerciseSet(routineSetId);
@@ -185,7 +238,7 @@ export const db = {
     routineSetId: number,
     updates: { target_reps?: number | null; target_weight?: number | null; is_warmup?: boolean }
   ) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase
         .from("routine_exercise_sets")
         .update(updates)
@@ -196,32 +249,72 @@ export const db = {
 
   // Workout Sessions
   startWorkoutSession: async (params: { routine_id: number | null; session_name: string; user_id: string }) => {
-    if (isOnline) {
+    if (useSupabase()) {
       const now = new Date();
-      return supabase.from("workout_sessions").insert({
+      const result = await supabase.from("workout_sessions").insert({
         routine_id: params.routine_id,
         session_name: params.session_name,
-        session_date: now.toISOString().split("T")[0],
+        session_date: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
         start_time: now.toTimeString().split(" ")[0],
         user_id: params.user_id,
       }).select().single();
+      if (result.data) await markSessionOrigin(result.data.session_id, false);
+      return result;
     }
-    return localDb.startWorkoutSession(params);
+    const result = await localDb.startWorkoutSession(params);
+    if (result.data) await markSessionOrigin(result.data.session_id, true);
+    return result;
   },
 
   finishWorkoutSession: async (sessionId: number, notes?: string) => {
-    if (isOnline) {
+    if (useSupabase()) {
       const now = new Date();
-      return supabase.from("workout_sessions").update({
+      const result = await supabase.from("workout_sessions").update({
         end_time: now.toTimeString().split(" ")[0],
         notes,
       }).eq("session_id", sessionId);
+      await clearSessionOrigin();
+      return result;
     }
-    return localDb.finishWorkoutSession(sessionId, notes);
+    // Offline: finish locally then queue the full session tree for later sync
+    const result = await localDb.finishWorkoutSession(sessionId, notes);
+    const origin = await getSessionOrigin();
+    if (origin?.isLocal) {
+      const [{ data: session }, { data: exercises }] = await Promise.all([
+        localDb.getWorkoutSession(sessionId),
+        localDb.getSessionExercises(sessionId),
+      ]);
+      const sets = (
+        await Promise.all((exercises ?? []).map(ex => localDb.getSessionExerciseSets(ex.session_exercise_id)))
+      ).flatMap(r => r.data ?? []);
+      if (session) {
+        await enqueuePendingSession({
+          session: {
+            routine_id: session.routine_id,
+            session_name: session.session_name,
+            session_date: session.session_date,
+            start_time: session.start_time,
+            end_time: session.end_time,
+            notes: session.notes,
+            user_id: session.user_id,
+          },
+          exercises: (exercises ?? []).map(ex => ({
+            session_exercise_id: ex.session_exercise_id,
+            exercise_id: ex.exercise_id,
+            exercise_name: ex.exercise_name,
+            exercise_order: ex.exercise_order,
+            notes: ex.notes,
+          })),
+          sets,
+        });
+      }
+    }
+    await clearSessionOrigin();
+    return result;
   },
 
   getWorkoutSessions: async (userId: string) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("workout_sessions")
         .select("*")
         .eq("user_id", userId)
@@ -232,7 +325,7 @@ export const db = {
   },
 
   getWorkoutSession: async (sessionId: number) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("workout_sessions")
         .select("*")
         .eq("session_id", sessionId)
@@ -242,7 +335,7 @@ export const db = {
   },
 
   getActiveSession: async (userId: string) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("workout_sessions")
         .select("*")
         .eq("user_id", userId)
@@ -252,8 +345,8 @@ export const db = {
     return localDb.getActiveSession(userId);
   },
 
-  updateWorkoutSession: async (sessionId: number, updates: { notes?: string; session_name?: string }) => {
-    if (isOnline) {
+  updateWorkoutSession: async (sessionId: number, updates: { notes?: string | null; session_name?: string }) => {
+    if (useSupabase()) {
       return supabase.from("workout_sessions")
         .update(updates)
         .eq("session_id", sessionId);
@@ -262,7 +355,7 @@ export const db = {
   },
 
   deleteWorkoutSession: async (sessionId: number) => {
-    if (isOnline) {
+    if (useSupabase()) {
       // Delete child records first (Supabase won't cascade unless FK has ON DELETE CASCADE)
       const { data: exercises } = await supabase.from("session_exercises")
         .select("session_exercise_id")
@@ -281,7 +374,7 @@ export const db = {
 
   // Session Exercises
   getSessionExercises: async (sessionId: number) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("session_exercises")
         .select("*")
         .eq("session_id", sessionId)
@@ -291,23 +384,30 @@ export const db = {
   },
 
   insertSessionExercise: async (exercise: { session_id: number; exercise_id: string; exercise_name: string; exercise_order: number; notes: string | null }) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("session_exercises").insert(exercise).select().single();
     }
     return localDb.insertSessionExercise(exercise);
   },
 
   deleteSessionExercise: async (sessionExerciseId: number) => {
-    if (isOnline) {
+    if (useSupabase()) {
       await supabase.from("session_exercise_sets").delete().eq("session_exercise_id", sessionExerciseId);
       return supabase.from("session_exercises").delete().eq("session_exercise_id", sessionExerciseId);
     }
     return localDb.deleteSessionExercise(sessionExerciseId);
   },
 
+  updateSessionExercise: async (sessionExerciseId: number, updates: { notes?: string; exercise_id?: string; exercise_name?: string }) => {
+    if (useSupabase()) {
+      return supabase.from("session_exercises").update(updates).eq("session_exercise_id", sessionExerciseId);
+    }
+    return localDb.updateSessionExercise(sessionExerciseId, updates);
+  },
+
   // Session Exercise Sets
   getSessionExerciseSets: async (sessionExerciseId: number) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("session_exercise_sets")
         .select("*")
         .eq("session_exercise_id", sessionExerciseId)
@@ -316,22 +416,22 @@ export const db = {
     return localDb.getSessionExerciseSets(sessionExerciseId);
   },
 
-  insertSessionExerciseSet: async (set: { session_exercise_id: number; set_number: number; weight: number | null; reps: number | null; is_warmup: boolean }) => {
-    if (isOnline) {
+  insertSessionExerciseSet: async (set: { session_exercise_id: number; set_number: number; weight: number | null; reps: number | null; is_warmup: boolean; completed?: boolean }) => {
+    if (useSupabase()) {
       return supabase.from("session_exercise_sets").insert(set).select().single();
     }
     return localDb.insertSessionExerciseSet(set);
   },
 
   updateSessionExerciseSet: async (sessionSetId: number, updates: { reps?: number | null; weight?: number | null; is_warmup?: boolean; completed?: boolean }) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("session_exercise_sets").update(updates).eq("session_set_id", sessionSetId);
     }
     return localDb.updateSessionExerciseSet(sessionSetId, updates);
   },
 
   deleteSessionExerciseSet: async (sessionSetId: number) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("session_exercise_sets").delete().eq("session_set_id", sessionSetId);
     }
     return localDb.deleteSessionExerciseSet(sessionSetId);
@@ -339,7 +439,7 @@ export const db = {
 
   // Start from routine (copies template → live session)
   startWorkoutFromRoutine: async (routineId: number, userId: string) => {
-    if (isOnline) {
+    if (useSupabase()) {
       // Round 1: fetch routine + exercises in parallel
       const [{ data: routine }, { data: exercises }] = await Promise.all([
         supabase.from("routines").select("*").eq("routine_id", routineId).single(),
@@ -355,7 +455,7 @@ export const db = {
         supabase.from("workout_sessions").insert({
           routine_id: routineId,
           session_name: routine.routine_name,
-          session_date: now.toISOString().split("T")[0],
+          session_date: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
           start_time: now.toTimeString().split(" ")[0],
           user_id: userId,
         }).select().single(),
@@ -400,14 +500,17 @@ export const db = {
         await supabase.from("session_exercise_sets").insert(setInserts);
       }
 
+      await markSessionOrigin(session.session_id, false);
       return { data: session, error: null };
     }
-    return localDb.startWorkoutFromRoutine(routineId, userId);
+    const result = await localDb.startWorkoutFromRoutine(routineId, userId);
+    if (result.data) await markSessionOrigin(result.data.session_id, true);
+    return result;
   },
 
   // Previous performance hints
   getPreviousSessionSets: async (exerciseId: string, userId: string, excludeSessionId: number) => {
-    if (isOnline) {
+    if (useSupabase()) {
       const { data: prevEx } = await supabase
         .from("session_exercises")
         .select("session_exercise_id, workout_sessions!inner(session_id, user_id, end_time)")
@@ -430,7 +533,7 @@ export const db = {
 
   // Personal Records
   getPersonalRecords: async (userId: string) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("personal_records").select("*").eq("user_id", userId);
     }
     return localDb.getPersonalRecords(userId);
@@ -442,7 +545,7 @@ export const db = {
     max_weight: number | null;
     max_volume: number | null;
   }) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("personal_records").upsert(record, { onConflict: "user_id,exercise_id" });
     }
     return localDb.upsertPersonalRecord(record);
@@ -450,7 +553,7 @@ export const db = {
 
   // Custom Exercises
   getCustomExercises: async (userId: string) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("custom_exercises").select("*").eq("user_id", userId);
     }
     return localDb.getCustomExercises(userId);
@@ -463,14 +566,14 @@ export const db = {
     primary_muscle: string | null;
     equipment: string | null;
   }) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("custom_exercises").insert(exercise);
     }
     return localDb.insertCustomExercise(exercise);
   },
 
   deleteCustomExercise: async (exerciseId: string) => {
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("custom_exercises").delete().eq("exercise_id", exerciseId);
     }
     return localDb.deleteCustomExercise(exerciseId);
@@ -479,7 +582,7 @@ export const db = {
   // Batch queries (profile performance — collapse N requests into 1)
   getBatchSessionExercises: async (sessionIds: number[]) => {
     if (sessionIds.length === 0) return { data: [], error: null };
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("session_exercises")
         .select("*")
         .in("session_id", sessionIds)
@@ -491,7 +594,7 @@ export const db = {
 
   getBatchSessionExerciseSets: async (exerciseIds: number[]) => {
     if (exerciseIds.length === 0) return { data: [], error: null };
-    if (isOnline) {
+    if (useSupabase()) {
       return supabase.from("session_exercise_sets")
         .select("*")
         .in("session_exercise_id", exerciseIds)
@@ -503,7 +606,7 @@ export const db = {
 
   // Exercise history for progression charts
   getExerciseHistory: async (exerciseId: string, userId: string) => {
-    if (isOnline) {
+    if (useSupabase()) {
       const { data: sessionExercises } = await supabase
         .from("session_exercises")
         .select("session_exercise_id, workout_sessions!inner(session_id, session_date, end_time, user_id)")
@@ -531,4 +634,70 @@ export const db = {
     }
     return localDb.getExerciseHistory(exerciseId, userId);
   },
+
+  // Sync offline-queued sessions to Supabase when reconnected
+  syncPendingSessions: async (userId: string): Promise<{ synced: number; errors: number }> => {
+    if (!isOnline) return { synced: 0, errors: 0 };
+    const queue = await getPendingQueue();
+    if (queue.length === 0) return { synced: 0, errors: 0 };
+
+    let synced = 0;
+    let errors = 0;
+    const successfulIndices: number[] = [];
+
+    for (let i = 0; i < queue.length; i++) {
+      const { session, exercises, sets } = queue[i];
+      try {
+        // Insert session row
+        const { data: newSession, error: sessionErr } = await supabase
+          .from("workout_sessions")
+          .insert({ ...session, user_id: userId })
+          .select()
+          .single();
+        if (sessionErr || !newSession) { errors++; continue; }
+
+        // Insert exercises, building a local→remote ID map
+        const exIdMap: Record<number, number> = {};
+        for (const ex of exercises) {
+          const { data: newEx, error: exErr } = await supabase
+            .from("session_exercises")
+            .insert({
+              session_id: newSession.session_id,
+              exercise_id: ex.exercise_id,
+              exercise_name: ex.exercise_name,
+              exercise_order: ex.exercise_order,
+              notes: ex.notes,
+            })
+            .select()
+            .single();
+          if (!exErr && newEx) exIdMap[ex.session_exercise_id] = newEx.session_exercise_id;
+        }
+
+        // Insert sets with remapped exercise IDs
+        const setsToInsert = sets
+          .filter(s => exIdMap[s.session_exercise_id] !== undefined)
+          .map(s => ({
+            session_exercise_id: exIdMap[s.session_exercise_id],
+            set_number: s.set_number,
+            weight: s.weight,
+            reps: s.reps,
+            is_warmup: s.is_warmup,
+            completed: s.completed,
+          }));
+        if (setsToInsert.length > 0) {
+          await supabase.from("session_exercise_sets").insert(setsToInsert);
+        }
+
+        successfulIndices.push(i);
+        synced++;
+      } catch {
+        errors++;
+      }
+    }
+
+    if (successfulIndices.length > 0) await removeFromQueue(successfulIndices);
+    return { synced, errors };
+  },
+
+  getPendingSessionCount: async (): Promise<number> => getPendingCount(),
 };

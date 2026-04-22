@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Routine, RoutineCardio, RoutineExercise } from '../../types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
+import { supabase } from '../backend/supabaseClient';
 
 const STORAGE_KEY = '@routines';
 const CARDIO_TYPES: RoutineCardio["type"][] = [
@@ -45,8 +46,22 @@ function normalizeCardioRow(row: any): RoutineCardio {
   };
 }
 
+type RoutineCardProps = {
+  routine: Routine;
+  onDelete: (routineId: string) => void;
+  onUse: (routine: Routine) => void;
+  onEdit: (routine: Routine) => void;
+};
+
+type CreateEditRoutineModalProps = {
+  visible: boolean;
+  onClose: () => void;
+  onSave: (routine: Routine) => void | Promise<void>;
+  editingRoutine: Routine | null;
+};
+
 // Routine Card Component with Edit and Delete
-const RoutineCard = ({ routine, onDelete, onUse, onEdit }) => {
+const RoutineCard = ({ routine, onDelete, onUse, onEdit }: RoutineCardProps) => {
   const [expanded, setExpanded] = useState(false);
 
   const handleDelete = () => {
@@ -157,7 +172,7 @@ function clampRoutineWeightInput(text: string): string {
 }
 
 // Create/Edit Routine Modal
-const CreateEditRoutineModal = ({ visible, onClose, onSave, editingRoutine }) => {
+const CreateEditRoutineModal = ({ visible, onClose, onSave, editingRoutine }: CreateEditRoutineModalProps) => {
   const [routineName, setRoutineName] = useState('');
   const [selectedDay, setSelectedDay] = useState<'Push' | 'Pull' | 'Legs' | 'Custom'>('Push');
   const [customDayName, setCustomDayName] = useState('');
@@ -594,6 +609,11 @@ export default function RoutinesScreen() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingRoutine, setEditingRoutine] = useState<Routine | null>(null);
 
+  const getRoutineDescription = (routine: Routine) => {
+    const dayLabel = routine.day === 'Custom' ? routine.customDayName || 'Custom' : routine.day;
+    return `${dayLabel} • ${routine.exercises.length} exercises`;
+  };
+
   useEffect(() => {
     loadRoutines();
   }, []);
@@ -618,9 +638,41 @@ export default function RoutinesScreen() {
     }
   };
 
-  const handleCreateRoutine = (newRoutine: Routine) => {
-    const updated = [...routines, newRoutine];
-    saveRoutines(updated);
+  const handleCreateRoutine = async (newRoutine: Routine) => {
+    let routineToPersist = newRoutine;
+
+    try {
+      const userId = await AsyncStorage.getItem('userId');
+      if (userId) {
+        const { data, error } = await supabase
+          .from('routines')
+          .insert({
+            routine_name: newRoutine.name,
+            description: getRoutineDescription(newRoutine),
+            created_at: newRoutine.createdAt instanceof Date
+              ? newRoutine.createdAt.toISOString()
+              : new Date(newRoutine.createdAt).toISOString(),
+            user_id: userId,
+          })
+          .select('routine_id')
+          .single();
+
+        if (error) throw error;
+
+        if (data?.routine_id != null) {
+          routineToPersist = {
+            ...newRoutine,
+            id: String(data.routine_id),
+          };
+        }
+      }
+    } catch (error) {
+      console.error('Failed to save routine to DB:', error);
+      Alert.alert('Sync Warning', 'Routine saved locally, but failed to sync to the database.');
+    }
+
+    const updated = [...routines, routineToPersist];
+    await saveRoutines(updated);
     setShowCreateModal(false);
     setEditingRoutine(null);
   };
@@ -630,19 +682,52 @@ export default function RoutinesScreen() {
     setShowCreateModal(true);
   };
 
-  const handleUpdateRoutine = (updatedRoutine: Routine) => {
+  const handleUpdateRoutine = async (updatedRoutine: Routine) => {
+    try {
+      const routineId = Number.parseInt(updatedRoutine.id, 10);
+      if (Number.isFinite(routineId)) {
+        const { error } = await supabase
+          .from('routines')
+          .update({
+            routine_name: updatedRoutine.name,
+            description: getRoutineDescription(updatedRoutine),
+          })
+          .eq('routine_id', routineId);
+
+        if (error) throw error;
+      }
+    } catch (error) {
+      console.error('Failed to update routine in DB:', error);
+      Alert.alert('Sync Warning', 'Routine updated locally, but failed to sync update to the database.');
+    }
+
     const updated = routines.map(r => 
       r.id === updatedRoutine.id ? updatedRoutine : r
     );
-    saveRoutines(updated);
+    await saveRoutines(updated);
     setShowCreateModal(false);
     setEditingRoutine(null);
   };
 
   const handleDeleteRoutine = (routineId: string) => {
-    const performDelete = () => {
+    const performDelete = async () => {
+      try {
+        const parsedRoutineId = Number.parseInt(routineId, 10);
+        if (Number.isFinite(parsedRoutineId)) {
+          const { error } = await supabase
+            .from('routines')
+            .delete()
+            .eq('routine_id', parsedRoutineId);
+
+          if (error) throw error;
+        }
+      } catch (error) {
+        console.error('Failed to delete routine in DB:', error);
+        Alert.alert('Sync Warning', 'Routine deleted locally, but failed to sync delete to the database.');
+      }
+
       const updated = routines.filter((r) => r.id !== routineId);
-      saveRoutines(updated);
+      await saveRoutines(updated);
     };
 
     // react-native-web's Alert.alert with multiple buttons is unreliable: the dialog

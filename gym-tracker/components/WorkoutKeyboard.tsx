@@ -16,7 +16,7 @@ type WorkoutKeyboardProps = {
   onDone: () => void;
 };
 
-const SLIDE_HEIGHT = 280;
+const INITIAL_HIDDEN_TRANSLATE = 520;
 
 export default function WorkoutKeyboard({
   visible,
@@ -32,16 +32,25 @@ export default function WorkoutKeyboard({
   onMoveRight,
   onDone,
 }: WorkoutKeyboardProps) {
-  const slideAnim = useRef(new Animated.Value(SLIDE_HEIGHT)).current;
+  const slideAnim = useRef(new Animated.Value(INITIAL_HIDDEN_TRANSLATE)).current;
   const [freshStart, setFreshStart] = useState(true);
+  const [keyboardHeight, setKeyboardHeight] = useState(INITIAL_HIDDEN_TRANSLATE);
+
+  const hiddenTranslate = keyboardHeight + 12;
 
   useEffect(() => {
     Animated.timing(slideAnim, {
-      toValue: visible ? 0 : SLIDE_HEIGHT,
+      toValue: visible ? 0 : hiddenTranslate,
       duration: 210,
       useNativeDriver: true,
     }).start();
-  }, [visible]);
+  }, [hiddenTranslate, visible]);
+
+  useEffect(() => {
+    if (!visible) {
+      slideAnim.setValue(hiddenTranslate);
+    }
+  }, [hiddenTranslate, slideAnim, visible]);
 
   // Reset when active field/set changes
   useEffect(() => {
@@ -79,6 +88,7 @@ export default function WorkoutKeyboard({
 
   return (
     <Animated.View
+      onLayout={(e) => setKeyboardHeight(e.nativeEvent.layout.height)}
       style={[styles.container, { transform: [{ translateY: slideAnim }] }]}
       pointerEvents={visible ? 'auto' : 'none'}>
 

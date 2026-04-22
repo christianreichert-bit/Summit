@@ -29,9 +29,14 @@ const SESSION_KEY = '@currentSessionId';
 type SessionData = {
   session_name?: string;
   notes?: string | null;
+  sleep_hours?: number | null;
+  nutrition?: 'good' | 'ok' | 'bad' | null;
+  took_supps?: boolean | null;
   session_date?: string;
   start_time?: string;
 };
+
+type NutritionQuality = 'good' | 'ok' | 'bad';
 
 type SetRowProps = {
   set: WorkoutSet;
@@ -85,6 +90,10 @@ const formatElapsedTime = (totalSeconds: number) => {
   return [hours, minutes, seconds]
     .map((value) => value.toString().padStart(2, '0'))
     .join(':');
+};
+
+const normalizeNutrition = (value: NutritionQuality | null | undefined): NutritionQuality => {
+  return value ?? 'ok';
 };
 
 // Set Row Component
@@ -282,6 +291,12 @@ export default function TodayScreen() {
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [sessionNotes, setSessionNotes] = useState('');
   const [noteDraft, setNoteDraft] = useState('');
+  const [sessionSleepHours, setSessionSleepHours] = useState<number | null>(null);
+  const [sleepHoursDraft, setSleepHoursDraft] = useState('');
+  const [sessionNutrition, setSessionNutrition] = useState<NutritionQuality>('ok');
+  const [nutritionDraft, setNutritionDraft] = useState<NutritionQuality>('ok');
+  const [sessionSupps, setSessionSupps] = useState(false);
+  const [suppsDraft, setSuppsDraft] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [timerOrigin, setTimerOrigin] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -439,6 +454,20 @@ export default function TodayScreen() {
       setSessionData(session);
       setSessionNotes(session?.notes || '');
       setNoteDraft(session?.notes || '');
+      const loadedSleepHours =
+        typeof session?.sleep_hours === 'number'
+          ? session.sleep_hours
+          : Number.isFinite(Number(session?.sleep_hours))
+            ? Number(session.sleep_hours)
+            : null;
+      const loadedNutrition = normalizeNutrition(session?.nutrition);
+      const loadedSupps = Boolean(session?.took_supps);
+      setSessionSleepHours(loadedSleepHours);
+      setSleepHoursDraft(loadedSleepHours == null ? '' : String(loadedSleepHours));
+      setSessionNutrition(loadedNutrition);
+      setNutritionDraft(loadedNutrition);
+      setSessionSupps(loadedSupps);
+      setSuppsDraft(loadedSupps);
 
       const sessionStart = session?.session_date && session?.start_time
         ? new Date(`${session.session_date}T${session.start_time}`)
@@ -489,6 +518,12 @@ export default function TodayScreen() {
     try {
       console.log('Starting session for routine:', selectedRoutine.name);
       console.log('User ID:', userId);
+
+      const routineId = Number.parseInt(selectedRoutine.id, 10);
+      if (!Number.isFinite(routineId)) {
+        Alert.alert('Error', 'Selected routine has an invalid ID.');
+        return;
+      }
       
       const now = new Date();
       const sessionDate = now.toISOString().split('T')[0];
@@ -498,7 +533,7 @@ export default function TodayScreen() {
         .from('workout_sessions')
         .insert({
           user_id: userId,
-          routine_id: null,
+          routine_id: routineId,
           session_name: selectedRoutine.name,
           session_date: sessionDate,
           start_time: startTime,
@@ -595,6 +630,12 @@ export default function TodayScreen() {
       });
       setSessionNotes('');
       setNoteDraft('');
+      setSessionSleepHours(null);
+      setSleepHoursDraft('');
+      setSessionNutrition('ok');
+      setNutritionDraft('ok');
+      setSessionSupps(false);
+      setSuppsDraft(false);
 
       const sessionStart =
         session.session_date && session.start_time
@@ -637,6 +678,12 @@ export default function TodayScreen() {
       setSessionData(null);
       setSessionNotes('');
       setNoteDraft('');
+      setSessionSleepHours(null);
+      setSleepHoursDraft('');
+      setSessionNutrition('ok');
+      setNutritionDraft('ok');
+      setSessionSupps(false);
+      setSuppsDraft(false);
       setShowNotesModal(false);
       setActiveInputTarget(null);
       clearTimerInterval();
@@ -940,6 +987,12 @@ export default function TodayScreen() {
       setSessionData(null);
       setSessionNotes('');
       setNoteDraft('');
+      setSessionSleepHours(null);
+      setSleepHoursDraft('');
+      setSessionNutrition('ok');
+      setNutritionDraft('ok');
+      setSessionSupps(false);
+      setSuppsDraft(false);
       setShowNotesModal(false);
       setActiveInputTarget(null);
       clearTimerInterval();
@@ -1064,6 +1117,9 @@ export default function TodayScreen() {
 
   const openNotesModal = () => {
     setNoteDraft(sessionNotes);
+    setSleepHoursDraft(sessionSleepHours == null ? '' : String(sessionSleepHours));
+    setNutritionDraft(sessionNutrition);
+    setSuppsDraft(sessionSupps);
     setShowNotesModal(true);
   };
 
@@ -1071,18 +1127,47 @@ export default function TodayScreen() {
     if (!currentSessionId) return;
 
     const normalizedNotes = noteDraft.trim();
+    const normalizedSleepHoursInput = sleepHoursDraft.trim();
+    const parsedSleepHours =
+      normalizedSleepHoursInput === '' ? null : parseInt(normalizedSleepHoursInput, 10);
+
+    if (
+      normalizedSleepHoursInput !== '' &&
+      (Number.isNaN(parsedSleepHours) || (parsedSleepHours as number) < 0 || (parsedSleepHours as number) > 24)
+    ) {
+      Alert.alert('Invalid Sleep', 'Sleep hours must be a whole number between 0 and 24.');
+      return;
+    }
 
     setSavingNote(true);
     try {
       const { error } = await supabase
         .from('workout_sessions')
-        .update({ notes: normalizedNotes || null })
+        .update({
+          notes: normalizedNotes || null,
+          sleep_hours: parsedSleepHours,
+          nutrition: nutritionDraft,
+          took_supps: suppsDraft,
+        })
         .eq('session_id', currentSessionId);
 
       if (error) throw error;
 
       setSessionNotes(normalizedNotes);
-      setSessionData((prev: SessionData | null) => (prev ? { ...prev, notes: normalizedNotes || null } : prev));
+      setSessionSleepHours(parsedSleepHours);
+      setSessionNutrition(nutritionDraft);
+      setSessionSupps(suppsDraft);
+      setSessionData((prev: SessionData | null) => (
+        prev
+          ? {
+              ...prev,
+              notes: normalizedNotes || null,
+              sleep_hours: parsedSleepHours,
+              nutrition: nutritionDraft,
+              took_supps: suppsDraft,
+            }
+          : prev
+      ));
       setShowNotesModal(false);
     } catch (error: any) {
       console.error('Failed to save notes:', error);
@@ -1417,6 +1502,59 @@ export default function TodayScreen() {
               textAlignVertical="top"
               editable={!savingNote}
             />
+
+            <View style={styles.noteFieldBlock}>
+              <Text style={styles.noteFieldLabel}>Sleep Last Night (hrs)</Text>
+              <TextInput
+                style={styles.smallInput}
+                value={sleepHoursDraft}
+                onChangeText={setSleepHoursDraft}
+                placeholder="e.g. 8"
+                placeholderTextColor="#666"
+                keyboardType={Platform.OS === 'ios' ? 'number-pad' : 'numeric'}
+                editable={!savingNote}
+                maxLength={2}
+              />
+            </View>
+
+            <View style={styles.noteFieldBlock}>
+              <Text style={styles.noteFieldLabel}>Today's Nutrition</Text>
+              <View style={styles.nutritionPillsRow}>
+                {(['good', 'ok', 'bad'] as NutritionQuality[]).map((level) => {
+                  const selected = nutritionDraft === level;
+                  return (
+                    <TouchableOpacity
+                      key={level}
+                      style={[
+                        styles.nutritionPill,
+                        selected && styles.nutritionPillSelected,
+                      ]}
+                      onPress={() => setNutritionDraft(level)}
+                      disabled={savingNote}>
+                      <Text
+                        style={[
+                          styles.nutritionPillText,
+                          selected && styles.nutritionPillTextSelected,
+                        ]}>
+                        {level.toUpperCase()}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.noteFieldBlock}>
+              <TouchableOpacity
+                style={styles.suppsToggleRow}
+                onPress={() => setSuppsDraft((prev) => !prev)}
+                disabled={savingNote}>
+                <View style={[styles.suppsCheckbox, suppsDraft && styles.suppsCheckboxChecked]}>
+                  {suppsDraft && <Text style={styles.suppsCheckmark}>✓</Text>}
+                </View>
+                <Text style={styles.suppsLabel}>Took daily supplements</Text>
+              </TouchableOpacity>
+            </View>
 
             <View style={styles.noteModalActions}>
               <TouchableOpacity
@@ -2132,6 +2270,81 @@ const styles = StyleSheet.create({
     fontSize: 15,
     padding: 14,
     marginBottom: 16,
+  },
+  noteFieldBlock: {
+    marginBottom: 14,
+  },
+  noteFieldLabel: {
+    color: '#888',
+    fontSize: 13,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  smallInput: {
+    height: 48,
+    backgroundColor: '#000000',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+    color: '#FFFFFF',
+    fontSize: 16,
+    paddingHorizontal: 14,
+  },
+  nutritionPillsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  nutritionPill: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#333',
+    backgroundColor: '#1A1A1A',
+    alignItems: 'center',
+  },
+  nutritionPillSelected: {
+    borderColor: '#0066CC',
+    backgroundColor: 'rgba(0, 102, 204, 0.2)',
+  },
+  nutritionPillText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  nutritionPillTextSelected: {
+    color: '#9CCBFF',
+  },
+  suppsToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  suppsCheckbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#333',
+    backgroundColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  suppsCheckboxChecked: {
+    borderColor: '#0066CC',
+    backgroundColor: '#0066CC',
+  },
+  suppsCheckmark: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 16,
+  },
+  suppsLabel: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
   },
   noteModalActions: {
     flexDirection: 'row',

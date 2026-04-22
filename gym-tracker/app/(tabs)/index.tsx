@@ -519,10 +519,62 @@ export default function TodayScreen() {
       console.log('Starting session for routine:', selectedRoutine.name);
       console.log('User ID:', userId);
 
-      const routineId = Number.parseInt(selectedRoutine.id, 10);
-      if (!Number.isFinite(routineId)) {
+      const parsedRoutineId = Number(selectedRoutine.id);
+      if (!Number.isInteger(parsedRoutineId) || parsedRoutineId <= 0) {
         Alert.alert('Error', 'Selected routine has an invalid ID.');
         return;
+      }
+      let routineId = parsedRoutineId;
+
+      const { data: existingRoutine, error: existingRoutineError } = await supabase
+        .from('routines')
+        .select('routine_id')
+        .eq('routine_id', routineId)
+        .maybeSingle();
+
+      if (existingRoutineError) {
+        throw existingRoutineError;
+      }
+
+      if (!existingRoutine) {
+        const dayLabel = selectedRoutine.day === 'Custom'
+          ? selectedRoutine.customDayName || 'Custom'
+          : selectedRoutine.day;
+
+        const { data: createdRoutine, error: createRoutineError } = await supabase
+          .from('routines')
+          .insert({
+            routine_name: selectedRoutine.name,
+            description: `${dayLabel} • ${selectedRoutine.exercises.length} exercises`,
+            created_at: selectedRoutine.createdAt
+              ? new Date(selectedRoutine.createdAt).toISOString()
+              : new Date().toISOString(),
+            user_id: userId,
+          })
+          .select('routine_id')
+          .single();
+
+        if (createRoutineError) {
+          throw createRoutineError;
+        }
+
+        if (createdRoutine?.routine_id == null) {
+          throw new Error('Routine was created but routine_id is missing');
+        }
+
+        routineId = createdRoutine.routine_id;
+
+        const syncedRoutine: Routine = {
+          ...selectedRoutine,
+          id: String(routineId),
+        };
+        setSelectedRoutine(syncedRoutine);
+
+        const updatedRoutines = routines.map((routine) =>
+          routine.id === selectedRoutine.id ? syncedRoutine : routine
+        );
+        setRoutines(updatedRoutines);
+        await AsyncStorage.setItem('@routines', JSON.stringify(updatedRoutines));
       }
       
       const now = new Date();

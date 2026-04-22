@@ -140,7 +140,7 @@ const RoutineCard = ({ routine, onDelete, onUse, onEdit }) => {
   );
 };
 
-const MAX_ROUTINE_WEIGHT_LBS = 1500;
+const MAX_ROUTINE_WEIGHT_LBS = 1150;
 
 function clampRoutineWeightInput(text: string): string {
   if (text === '') return '';

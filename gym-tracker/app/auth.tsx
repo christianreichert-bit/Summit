@@ -1,12 +1,11 @@
 ﻿import { useEffect, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { db, isOnline } from "./backend/db";
 import { useTheme } from "./theme/ThemeContext";
 import PrivacyPolicyModal from "./components/PrivacyPolicyModal";
-import ExpoGoQrSection from "./components/ExpoGoQrSection";
 import { redeemPendingInvite } from "./utils/friendInvite";
 
 export default function AuthScreen() {
@@ -404,18 +403,7 @@ export default function AuthScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      {Platform.OS === "web" ? (
-        <ScrollView
-          contentContainerStyle={[styles.content, styles.contentWeb]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {authBody}
-          <ExpoGoQrSection webOnly />
-        </ScrollView>
-      ) : (
-        <View style={styles.content}>{authBody}</View>
-      )}
+      <View style={styles.content}>{authBody}</View>
       <PrivacyPolicyModal visible={showPrivacyPolicy} onClose={() => setShowPrivacyPolicy(false)} />
     </SafeAreaView>
   );
@@ -429,14 +417,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     paddingHorizontal: 24,
-  },
-  contentWeb: {
-    flexGrow: 1,
-    justifyContent: "center",
-    paddingVertical: 32,
-    maxWidth: 480,
-    width: "100%",
-    alignSelf: "center",
   },
   title: {
     fontSize: 30,

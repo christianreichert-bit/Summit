@@ -13,6 +13,7 @@ import { requestNotificationPermissions } from "./utils/notifications";
 import HeightPicker, { feetInchesToInches, inchesToFeetInches } from "./components/HeightPicker";
 import { privacyPolicySections, PRIVACY_POLICY_LAST_UPDATED } from "./utils/privacyPolicy";
 import { medicalDisclaimerSections } from "./utils/medicalDisclaimer";
+import ExpoGoQrSection from "./components/ExpoGoQrSection";
 
 const NOTIF_KEY = "@gym_tracker_notifications";
 
@@ -818,6 +819,8 @@ export default function SettingsScreen() {
             <Text style={{ fontSize: 16, fontWeight: "600", color: colors.danger }}>Log Out</Text>
           </Pressable>
         </View>
+
+        <ExpoGoQrSection />
 
         <Text style={{ textAlign: "center", color: colors.textTertiary, fontSize: 12, marginTop: 20, fontWeight: "500" }}>
           Gym Tracker v1.0.0

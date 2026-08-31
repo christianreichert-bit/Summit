@@ -20,6 +20,7 @@ type WorkoutHistoryCardProps = {
   exerciseNames?: string[];
   onDelete?: (sessionId: number) => void;
   onEditWorkout?: (sessionId: number) => void;
+  readOnly?: boolean;
   totalCardioDistanceMeters?: number;
   totalCardioDurationSeconds?: number;
   distanceUnit?: 'km' | 'mi';
@@ -81,6 +82,7 @@ const WorkoutHistoryCard = memo(function WorkoutHistoryCard({
   exerciseNames = [],
   onDelete,
   onEditWorkout,
+  readOnly = false,
   totalCardioDistanceMeters = 0,
   totalCardioDurationSeconds = 0,
   distanceUnit = 'km',
@@ -162,8 +164,9 @@ const WorkoutHistoryCard = memo(function WorkoutHistoryCard({
           style={({ pressed }) => [styles.menuBtn, pressed && { opacity: 0.4 }]}
           onPress={() => setMenuOpen(true)}
           hitSlop={8}
+          disabled={readOnly}
         >
-          <Ionicons name="ellipsis-vertical" size={18} color={colors.textSecondary} />
+          {!readOnly && <Ionicons name="ellipsis-vertical" size={18} color={colors.textSecondary} />}
         </Pressable>
       </View>
 

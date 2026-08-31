@@ -20,7 +20,10 @@ export default function InviteScreen() {
       const { data: sessionData } = await db.getSession();
       const userId = sessionData?.session?.user?.id;
       if (userId) {
-        await db.redeemFriendInvite(token, userId);
+        const { error } = await db.redeemFriendInvite(token, userId);
+        if (error) {
+          await storePendingInviteToken(token);
+        }
         router.replace("/(tabs)/friends");
       } else {
         await storePendingInviteToken(token);

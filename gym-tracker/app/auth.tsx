@@ -48,9 +48,12 @@ export default function AuthScreen() {
     });
 
     const result = db.onAuthStateChange((event: string, session: any) => {
-      if (session && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED")) {
+      if (session && event === "SIGNED_IN") {
         syncStoredUserId()
-          .then(() => router.replace("/(tabs)"))
+          .then(async () => {
+            if (session.user?.id) await redeemPendingInvite(session.user.id);
+            router.replace("/(tabs)");
+          })
           .catch((syncError) => console.error("Failed to sync stored user id:", syncError));
       }
     });

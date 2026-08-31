@@ -163,6 +163,7 @@ export const db = {
       height_inches?: number | null;
       body_weight_lbs?: number | null;
       gender?: "male" | "female" | null;
+      profile_stats?: string[] | null;
     }
   ) => {
     if (useSupabase()) {
@@ -984,6 +985,23 @@ export const db = {
 
   redeemFriendInvite: async (token: string, redeemerId: string) => {
     if (useSupabase()) {
+      const { data: inviterFromRpc, error: rpcErr } = await supabase.rpc("redeem_friend_invite", {
+        p_token: token,
+      });
+      if (!rpcErr) {
+        return { data: { friend_id: (inviterFromRpc as string) ?? null }, error: null };
+      }
+
+      const rpcUnavailable =
+        rpcErr.code === "PGRST202" ||
+        rpcErr.code === "42883" ||
+        rpcErr.message?.includes("redeem_friend_invite") ||
+        rpcErr.message?.includes("Could not find the function");
+
+      if (!rpcUnavailable) {
+        return { data: null, error: rpcErr };
+      }
+
       const { data: invite, error: inviteErr } = await supabase
         .from("friend_invites")
         .select("user_id, expires_at")
@@ -1074,12 +1092,13 @@ export const db = {
         .or(`and(blocker_id.eq.${targetId},blocked_id.eq.${viewerId}),and(blocker_id.eq.${viewerId},blocked_id.eq.${targetId})`)
         .maybeSingle();
       if (block) return { data: false, error: null };
-      const { data: link } = await supabase
+      const { data: links, error: linkErr } = await supabase
         .from("friendships")
         .select("friendship_id")
         .or(`and(user_id.eq.${viewerId},friend_id.eq.${targetId}),and(user_id.eq.${targetId},friend_id.eq.${viewerId})`)
-        .maybeSingle();
-      return { data: !!link, error: null };
+        .limit(1);
+      if (linkErr) return { data: false, error: linkErr };
+      return { data: (links?.length ?? 0) > 0, error: null };
     }
     return localDb.canViewFriendProfile(viewerId, targetId);
   },

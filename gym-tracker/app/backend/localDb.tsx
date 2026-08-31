@@ -10,6 +10,7 @@ type User = {
   height_inches?: number | null;
   body_weight_lbs?: number | null;
   gender?: "male" | "female" | null;
+  profile_stats?: string[] | null;
 };
 
 type Routine = {
@@ -208,6 +209,7 @@ export const localDb = {
       height_inches?: number | null;
       body_weight_lbs?: number | null;
       gender?: "male" | "female" | null;
+      profile_stats?: string[] | null;
     }
   ) => {
     const user = localUsers.find((u) => u.user_id === userId);

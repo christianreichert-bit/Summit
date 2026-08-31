@@ -7,7 +7,6 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   View,
@@ -17,7 +16,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { db } from "../backend/db";
 import { useTheme } from "../theme/ThemeContext";
-import { buildFriendInviteUrl, redeemPendingInvite } from "../utils/friendInvite";
+import { buildFriendInviteUrl, copyInviteLink, redeemPendingInvite, shareFriendInviteUrl } from "../utils/friendInvite";
 
 type FriendRow = {
   user_id: string;
@@ -36,6 +35,8 @@ export default function FriendsScreen() {
   const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [optionsFriend, setOptionsFriend] = useState<FriendRow | null>(null);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [inviteCopied, setInviteCopied] = useState(false);
 
   const loadFriends = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
@@ -46,7 +47,13 @@ export default function FriendsScreen() {
       setLoading(false);
       return;
     }
-    await redeemPendingInvite(userId);
+    const redeem = await redeemPendingInvite(userId);
+    if (!redeem.ok) {
+      setError(redeem.message ?? "Could not accept friend invite.");
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     const { data, error: err } = await db.getFriends(userId);
     if (err) setError(err.message);
     else setFriends((data as FriendRow[]) ?? []);
@@ -72,15 +79,20 @@ export default function FriendsScreen() {
       return;
     }
     const url = buildFriendInviteUrl(data.token);
-    try {
-      await Share.share({
-        message: `Add me on Summit! Tap this link after you sign up: ${url}`,
-        url,
-        title: "Summit friend invite",
-      });
-    } catch {
-      Alert.alert("Invite link", url);
-    }
+    setInviteCopied(false);
+    setInviteUrl(url);
+  };
+
+  const handleCopyInvite = async () => {
+    if (!inviteUrl) return;
+    const copied = await copyInviteLink(inviteUrl);
+    setInviteCopied(copied);
+    if (!copied) Alert.alert("Copy this link", inviteUrl);
+  };
+
+  const handleShareFromModal = async () => {
+    if (!inviteUrl) return;
+    await shareFriendInviteUrl(inviteUrl);
   };
 
   const handleBlock = async () => {
@@ -125,7 +137,7 @@ export default function FriendsScreen() {
           <Ionicons name="link-outline" size={22} color="#fff" />
           <View style={{ flex: 1 }}>
             <Text style={styles.inviteTitle}>{sharing ? "Creating link…" : "Invite a friend"}</Text>
-            <Text style={styles.inviteSub}>Share a link — when they join, you become friends automatically</Text>
+            <Text style={styles.inviteSub}>Creates an /invite link — not the /friends page URL</Text>
           </View>
           <Ionicons name="share-outline" size={22} color="#fff" />
         </Pressable>
@@ -175,6 +187,38 @@ export default function FriendsScreen() {
         )}
       </ScrollView>
 
+      <Modal visible={!!inviteUrl} transparent animationType="fade" onRequestClose={() => setInviteUrl(null)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setInviteUrl(null)}>
+          <Pressable style={[styles.sheet, { backgroundColor: colors.surface }]} onPress={(e) => e.stopPropagation()}>
+            <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text, marginBottom: 8, textAlign: "center" }}>
+              Your invite link
+            </Text>
+            <Text style={{ fontSize: 13, color: colors.textSecondary, textAlign: "center", marginBottom: 14, lineHeight: 18 }}>
+              Send this link — it must say /invite?token=...{"\n"}Do not copy the /friends URL from your browser bar.
+            </Text>
+            <Text selectable style={[styles.inviteUrlBox, { color: colors.text, backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+              {inviteUrl}
+            </Text>
+            {inviteCopied && (
+              <Text style={{ color: colors.primary, fontSize: 13, fontWeight: "600", textAlign: "center", marginTop: 8 }}>
+                Copied to clipboard
+              </Text>
+            )}
+            <Pressable style={[styles.sheetBtn, { backgroundColor: colors.primary, marginTop: 14 }]} onPress={handleCopyInvite}>
+              <Ionicons name="copy-outline" size={18} color="#fff" />
+              <Text style={{ fontSize: 16, fontWeight: "600", color: "#fff" }}>Copy link</Text>
+            </Pressable>
+            <Pressable style={[styles.sheetBtn, { backgroundColor: colors.surfaceSecondary }]} onPress={handleShareFromModal}>
+              <Ionicons name="share-outline" size={18} color={colors.text} />
+              <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>Share</Text>
+            </Pressable>
+            <Pressable style={[styles.sheetBtn, { backgroundColor: colors.surfaceSecondary }]} onPress={() => setInviteUrl(null)}>
+              <Text style={{ fontSize: 16, fontWeight: "600", color: colors.textSecondary }}>Done</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       <Modal visible={!!optionsFriend} transparent animationType="fade" onRequestClose={() => setOptionsFriend(null)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setOptionsFriend(null)}>
           <View style={[styles.sheet, { backgroundColor: colors.surface }]}>
@@ -215,4 +259,5 @@ const styles = StyleSheet.create({
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
   sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 36, gap: 10 },
   sheetBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 12 },
+  inviteUrlBox: { fontSize: 13, lineHeight: 18, padding: 12, borderRadius: 10, borderWidth: 1 },
 });

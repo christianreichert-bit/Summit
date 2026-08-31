@@ -21,9 +21,10 @@ export default function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const [resetCooldown, setResetCooldown] = useState(0);
   const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
+  const [acceptedAge, setAcceptedAge] = useState(false);
   const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
 
-  const signUpBlocked = mode === "signUp" && !acceptedPrivacy;
+  const signUpBlocked = mode === "signUp" && (!acceptedPrivacy || !acceptedAge);
 
   const syncStoredUserId = async () => {
     const result = await db.getUser();
@@ -108,6 +109,10 @@ export default function AuthScreen() {
 
     if (mode === "signUp" && !acceptedPrivacy) {
       setError("You must accept the Privacy Policy to create an account.");
+      return;
+    }
+    if (mode === "signUp" && !acceptedAge) {
+      setError("You must confirm you are at least 13 years old to create an account.");
       return;
     }
     if (!email.trim() || !password.trim()) {
@@ -312,30 +317,50 @@ export default function AuthScreen() {
           )}
 
           {mode === "signUp" && (
-            <View style={styles.consentRow}>
-              <Pressable
-                onPress={() => setAcceptedPrivacy((v) => !v)}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: acceptedPrivacy }}
-                hitSlop={8}
-              >
-                <View style={[
-                  styles.checkbox,
-                  { borderColor: acceptedPrivacy ? colors.primary : colors.border, backgroundColor: acceptedPrivacy ? colors.primary : "transparent" },
-                ]}>
-                  {acceptedPrivacy && <Ionicons name="checkmark" size={14} color="#fff" />}
-                </View>
-              </Pressable>
-              <Text style={[styles.consentText, { color: colors.textSecondary }]}>
-                I accept and acknowledge the{" "}
-                <Text
-                  style={{ color: colors.primary, fontWeight: "700", textDecorationLine: "underline" }}
-                  onPress={() => setShowPrivacyPolicy(true)}
+            <>
+              <View style={styles.consentRow}>
+                <Pressable
+                  onPress={() => setAcceptedAge((v) => !v)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: acceptedAge }}
+                  hitSlop={8}
                 >
-                  Privacy Policy
+                  <View style={[
+                    styles.checkbox,
+                    { borderColor: acceptedAge ? colors.primary : colors.border, backgroundColor: acceptedAge ? colors.primary : "transparent" },
+                  ]}>
+                    {acceptedAge && <Ionicons name="checkmark" size={14} color="#fff" />}
+                  </View>
+                </Pressable>
+                <Text style={[styles.consentText, { color: colors.textSecondary }]}>
+                  I confirm I am at least 13 years old (or the minimum age required in my country).
                 </Text>
-              </Text>
-            </View>
+              </View>
+              <View style={styles.consentRow}>
+                <Pressable
+                  onPress={() => setAcceptedPrivacy((v) => !v)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: acceptedPrivacy }}
+                  hitSlop={8}
+                >
+                  <View style={[
+                    styles.checkbox,
+                    { borderColor: acceptedPrivacy ? colors.primary : colors.border, backgroundColor: acceptedPrivacy ? colors.primary : "transparent" },
+                  ]}>
+                    {acceptedPrivacy && <Ionicons name="checkmark" size={14} color="#fff" />}
+                  </View>
+                </Pressable>
+                <Text style={[styles.consentText, { color: colors.textSecondary }]}>
+                  I accept and acknowledge the{" "}
+                  <Text
+                    style={{ color: colors.primary, fontWeight: "700", textDecorationLine: "underline" }}
+                    onPress={() => setShowPrivacyPolicy(true)}
+                  >
+                    Privacy Policy
+                  </Text>
+                </Text>
+              </View>
+            </>
           )}
 
           <Pressable
@@ -363,6 +388,7 @@ export default function AuthScreen() {
               onPress={() => {
                 setMode((prev) => (prev === "signIn" ? "signUp" : "signIn"));
                 setAcceptedPrivacy(false);
+                setAcceptedAge(false);
                 setError(null);
                 setInfo(null);
               }}

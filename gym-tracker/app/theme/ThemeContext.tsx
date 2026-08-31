@@ -95,15 +95,15 @@ const THEME_STORAGE_KEY = "@gym_tracker_theme";
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const systemScheme = useColorScheme();
   const [mode, setModeState] = useState<ThemeMode>("system");
-  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    AsyncStorage.getItem(THEME_STORAGE_KEY).then((stored) => {
-      if (stored === "light" || stored === "dark" || stored === "system") {
-        setModeState(stored);
-      }
-      setLoaded(true);
-    });
+    AsyncStorage.getItem(THEME_STORAGE_KEY)
+      .then((stored) => {
+        if (stored === "light" || stored === "dark" || stored === "system") {
+          setModeState(stored);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const setMode = (newMode: ThemeMode) => {
@@ -115,8 +115,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     mode === "dark" || (mode === "system" && systemScheme === "dark");
 
   const colors = isDark ? darkColors : lightColors;
-
-  if (!loaded) return null;
 
   return (
     <ThemeContext.Provider value={{ colors, mode, isDark, setMode }}>

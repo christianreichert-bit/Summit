@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import { Stack, useRouter, useSegments } from "expo-router";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { db } from "./backend/db";
 import { ThemeProvider, useTheme } from "./theme/ThemeContext";
 import { useSyncManager } from "./utils/useSyncManager";
@@ -115,10 +116,12 @@ function RootNav() {
 
 export default function RootLayout() {
   return (
-    <ThemeProvider>
-      <ActiveWorkoutProvider>
-        <RootNav />
-      </ActiveWorkoutProvider>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <ActiveWorkoutProvider>
+          <RootNav />
+        </ActiveWorkoutProvider>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }

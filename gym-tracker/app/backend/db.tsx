@@ -20,6 +20,27 @@ const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 // useSupabase = Supabase configured AND network available (runtime check)
 const useSupabase = () => isOnline && networkStatus.isConnected;
 
+/** DB requires exercise_type on session_exercises (NOT NULL). */
+export const DEFAULT_SESSION_EXERCISE_TYPE = "strength";
+
+export function buildSessionExerciseInsert(row: {
+  session_id: number;
+  exercise_id: string;
+  exercise_name: string;
+  exercise_order: number;
+  notes?: string | null;
+  exercise_type?: string;
+}) {
+  return {
+    session_id: row.session_id,
+    exercise_id: row.exercise_id,
+    exercise_name: row.exercise_name,
+    exercise_order: row.exercise_order,
+    notes: row.notes ?? null,
+    exercise_type: row.exercise_type ?? DEFAULT_SESSION_EXERCISE_TYPE,
+  };
+}
+
 async function syncUserProfileFromAuth() {
   const {
     data: { user },
@@ -438,9 +459,9 @@ export const db = {
     return localDb.getSessionExercises(sessionId);
   },
 
-  insertSessionExercise: async (exercise: { session_id: number; exercise_id: string; exercise_name: string; exercise_order: number; notes: string | null }) => {
+  insertSessionExercise: async (exercise: { session_id: number; exercise_id: string; exercise_name: string; exercise_order: number; notes: string | null; exercise_type?: string }) => {
     if (useSupabase()) {
-      return supabase.from("session_exercises").insert(exercise).select().single();
+      return supabase.from("session_exercises").insert(buildSessionExerciseInsert(exercise)).select().single();
     }
     return localDb.insertSessionExercise(exercise);
   },
@@ -523,13 +544,15 @@ export const db = {
       if ((exercises ?? []).length === 0) return { data: session, error: null };
 
       // Round 3: batch insert all session exercises at once
-      const exerciseInserts = (exercises ?? []).map((ex: any) => ({
-        session_id: session.session_id,
-        exercise_id: ex.exercise_id,
-        exercise_name: ex.exercise_name,
-        exercise_order: ex.exercise_order,
-        notes: null,
-      }));
+      const exerciseInserts = (exercises ?? []).map((ex: any) =>
+        buildSessionExerciseInsert({
+          session_id: session.session_id,
+          exercise_id: ex.exercise_id,
+          exercise_name: ex.exercise_name,
+          exercise_order: ex.exercise_order,
+          notes: null,
+        })
+      );
       const { data: sessionExercises, error: exErr } = await supabase
         .from("session_exercises").insert(exerciseInserts).select();
       if (exErr) return { data: null, error: exErr };
@@ -716,13 +739,15 @@ export const db = {
         for (const ex of exercises) {
           const { data: newEx, error: exErr } = await supabase
             .from("session_exercises")
-            .insert({
-              session_id: newSession.session_id,
-              exercise_id: ex.exercise_id,
-              exercise_name: ex.exercise_name,
-              exercise_order: ex.exercise_order,
-              notes: ex.notes,
-            })
+            .insert(
+              buildSessionExerciseInsert({
+                session_id: newSession.session_id,
+                exercise_id: ex.exercise_id,
+                exercise_name: ex.exercise_name,
+                exercise_order: ex.exercise_order,
+                notes: ex.notes,
+              })
+            )
             .select()
             .single();
           if (!exErr && newEx) exIdMap[ex.session_exercise_id] = newEx.session_exercise_id;

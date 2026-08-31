@@ -1,6 +1,6 @@
 // app/(tabs)/index.tsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import {
   StyleSheet,
   View,
@@ -20,6 +20,7 @@ import { Routine, RoutineCardio, Exercise, WorkoutLog, Set as WorkoutSet } from 
 import exercisesData from '../../assets/data/exercises.json';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../backend/supabaseClient';
+import { buildSessionExerciseInsert } from '../backend/db';
 import ExerciseSearchModal from '../../components/ExerciseSearchModal';
 import WorkoutKeyboard from '../../components/WorkoutKeyboard';
 
@@ -158,6 +159,14 @@ const formatElapsedTime = (totalSeconds: number) => {
 const normalizeNutrition = (value: NutritionQuality | null | undefined): NutritionQuality => {
   return value ?? 'ok';
 };
+
+function showAppAlert(title: string, message: string) {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.alert(`${title}\n\n${message}`);
+    return;
+  }
+  Alert.alert(title, message);
+}
 
 // Set Row Component
 const SetRow = ({ set, onToggleComplete, onActivateField, isActive, activeField }: SetRowProps) => {
@@ -344,6 +353,7 @@ export default function TodayScreen() {
   const { selectedRoutine: selectedRoutineParam } = useLocalSearchParams<{ selectedRoutine?: string | string[] }>();
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [startingSession, setStartingSession] = useState(false);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [selectedRoutine, setSelectedRoutine] = useState<Routine | null>(null);
@@ -397,6 +407,21 @@ export default function TodayScreen() {
   useEffect(() => {
     initializeScreen();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (currentSessionId) return;
+      void (async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        const authUserId = user?.id ?? null;
+        if (authUserId) {
+          setUserId(authUserId);
+          await AsyncStorage.setItem('userId', authUserId);
+        }
+        await loadRoutines(authUserId);
+      })();
+    }, [currentSessionId])
+  );
 
   useEffect(() => {
     if (!selectedRoutineParam) return;
@@ -578,38 +603,53 @@ export default function TodayScreen() {
 
   const handleStartSession = async () => {
     if (!selectedRoutine) {
-      Alert.alert('Error', 'Please select a routine');
-      return;
-    }
-    
-    if (!userId) {
-      Alert.alert('Not Logged In', 'Please log in first to start a workout session');
+      showAppAlert('Error', 'Please select a routine');
       return;
     }
 
-    setLoading(true);
+    setStartingSession(true);
     try {
-      console.log('Starting session for routine:', selectedRoutine.name);
-      console.log('User ID:', userId);
+      let activeUserId = userId;
+      if (!activeUserId) {
+        const { data: { user } } = await supabase.auth.getUser();
+        activeUserId = user?.id ?? null;
+        if (activeUserId) {
+          setUserId(activeUserId);
+          await AsyncStorage.setItem('userId', activeUserId);
+        }
+      }
 
-      const parsedRoutineId = Number(selectedRoutine.id);
-      if (!Number.isInteger(parsedRoutineId) || parsedRoutineId <= 0) {
-        Alert.alert('Error', 'Selected routine has an invalid ID.');
+      if (!activeUserId) {
+        showAppAlert('Not Logged In', 'Please log in first to start a workout session');
         return;
       }
-      let routineId = parsedRoutineId;
 
-      const { data: existingRoutine, error: existingRoutineError } = await supabase
-        .from('routines')
-        .select('routine_id')
-        .eq('routine_id', routineId)
-        .maybeSingle();
+      console.log('Starting session for routine:', selectedRoutine.name);
+      console.log('User ID:', activeUserId);
 
-      if (existingRoutineError) {
-        throw existingRoutineError;
+      let routineId: number | null = null;
+      const parsedRoutineId = Number(selectedRoutine.id);
+      const canLookupRoutineInDb =
+        Number.isInteger(parsedRoutineId) && parsedRoutineId > 0 && parsedRoutineId < 1_000_000_000_000;
+
+      if (canLookupRoutineInDb) {
+        const { data: existingRoutine, error: existingRoutineError } = await supabase
+          .from('routines')
+          .select('routine_id')
+          .eq('routine_id', parsedRoutineId)
+          .eq('user_id', activeUserId)
+          .maybeSingle();
+
+        if (existingRoutineError) {
+          throw existingRoutineError;
+        }
+
+        if (existingRoutine?.routine_id != null) {
+          routineId = existingRoutine.routine_id;
+        }
       }
 
-      if (!existingRoutine) {
+      if (routineId == null) {
         const dayLabel = selectedRoutine.day === 'Custom'
           ? selectedRoutine.customDayName || 'Custom'
           : selectedRoutine.day;
@@ -622,7 +662,7 @@ export default function TodayScreen() {
             created_at: selectedRoutine.createdAt
               ? new Date(selectedRoutine.createdAt).toISOString()
               : new Date().toISOString(),
-            user_id: userId,
+            user_id: activeUserId,
           })
           .select('routine_id')
           .single();
@@ -657,7 +697,7 @@ export default function TodayScreen() {
       const { data: session, error: sessionError } = await supabase
         .from('workout_sessions')
         .insert({
-          user_id: userId,
+          user_id: activeUserId,
           routine_id: routineId,
           session_name: selectedRoutine.name,
           session_date: sessionDate,
@@ -673,12 +713,14 @@ export default function TodayScreen() {
       
       console.log('Session created:', session);
 
-      const sessionExercises = selectedRoutine.exercises.map((ex, index) => ({
-        session_id: session.session_id,
-        exercise_id: ex.exerciseId || ex.name,
-        exercise_name: ex.name,
-        exercise_order: index + 1,
-      }));
+      const sessionExercises = selectedRoutine.exercises.map((ex, index) =>
+        buildSessionExerciseInsert({
+          session_id: session.session_id,
+          exercise_id: ex.exerciseId || ex.name,
+          exercise_name: ex.name,
+          exercise_order: index + 1,
+        })
+      );
 
       console.log('Creating exercises:', sessionExercises);
 
@@ -797,9 +839,9 @@ export default function TodayScreen() {
       console.log('Session loaded successfully');
     } catch (error: any) {
       console.error('Failed to start session:', error);
-      Alert.alert('Error', error.message || 'Failed to start workout session');
+      showAppAlert('Error', error.message || 'Failed to start workout session');
     } finally {
-      setLoading(false);
+      setStartingSession(false);
     }
   };
 
@@ -887,12 +929,14 @@ export default function TodayScreen() {
     try {
       const { data: createdEx, error: exError } = await supabase
         .from('session_exercises')
-        .insert({
-          session_id: currentSessionId,
-          exercise_id: selectedEx.id,
-          exercise_name: selectedEx.name,
-          exercise_order: exercises.length + 1,
-        })
+        .insert(
+          buildSessionExerciseInsert({
+            session_id: Number(currentSessionId),
+            exercise_id: selectedEx.id,
+            exercise_name: selectedEx.name,
+            exercise_order: exercises.length + 1,
+          })
+        )
         .select()
         .single();
 
@@ -1276,8 +1320,8 @@ export default function TodayScreen() {
             <TouchableOpacity
               style={styles.startButton}
               onPress={handleStartSession}
-              disabled={loading}>
-              {loading ? (
+              disabled={startingSession}>
+              {startingSession ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
                 <Text style={styles.startButtonText}>Start Workout</Text>

@@ -18,20 +18,30 @@ function RootNav() {
   const { isSyncing, lastSyncedCount } = useSyncManager(userId);
 
   useEffect(() => {
-    db.getSession().then((result: any) => {
-      setSession(result?.data?.session ?? null);
-      setLoading(false);
-    });
+    let active = true;
+    db.getSession()
+      .then((result: any) => {
+        if (!active) return;
+        setSession(result?.data?.session ?? null);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setSession(null);
+        setLoading(false);
+      });
 
     const result = db.onAuthStateChange(
       (_event: string, session: any) => {
         setSession(session);
+        setLoading(false);
       }
     );
 
     const subscription = result?.data?.subscription;
 
     return () => {
+      active = false;
       if (subscription?.unsubscribe) {
         subscription.unsubscribe();
       }
@@ -56,7 +66,13 @@ function RootNav() {
     }
   }, [session, loading, segments]);
 
-  if (loading) return null;
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: colors.background }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>

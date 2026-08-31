@@ -10,6 +10,7 @@ import WorkoutHistoryCard from "../components/WorkoutHistoryCard";
 import { SessionWithMeta } from "../components/WorkoutHistoryList";
 import WorkoutChart from "../components/WorkoutChart";
 import { formatDistance, formatDurationShort, formatPace } from "../utils/cardioUtils";
+import { computeBestLifts, BestLifts } from "../utils/bestLifts";
 
 // ─── Stat definitions ─────────────────────────────────────────────────────────
 
@@ -131,6 +132,7 @@ export default function ProfileScreen() {
     longestRunMeters: number;
     fastestPaceSecPerKm: number | null;
   } | null>(null);
+  const [bestLifts, setBestLifts] = useState<BestLifts>({ squat: 0, deadlift: 0, bench: 0 });
 
   const hasDataRef = useRef(false);
   const lastFetchedRef = useRef(0);
@@ -279,6 +281,7 @@ export default function ProfileScreen() {
         longestSession,
         avgDuration,
       });
+      setBestLifts(computeBestLifts(allExercisesFlat ?? [], setsByExercise));
       hasDataRef.current = true;
       lastFetchedRef.current = Date.now();
     } catch (e: any) {
@@ -389,28 +392,56 @@ export default function ProfileScreen() {
 
       {/* ── Avatar + bio ── */}
       <View style={styles.avatarSection}>
-        {profile?.avatar_url ? (
-          <Image source={{ uri: profile.avatar_url }} style={styles.avatarCircle} />
-        ) : (
-          <View style={[styles.avatarCircle, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.avatarInitials, { color: colors.primary }]}>{initials}</Text>
-          </View>
-        )}
-        <View style={styles.bioInfo}>
-          <Text style={[styles.bioName, { color: colors.text }]}>{profile?.username ?? "—"}</Text>
-          {!!profile?.bio && (
-            <Text style={[styles.bioText, { color: colors.textSecondary }]} numberOfLines={2}>
-              {profile.bio}
-            </Text>
-          )}
-          {currentStreak > 0 && (
-            <View style={styles.streakRow}>
-              <Ionicons name="flame" size={16} color="#ff9f0a" />
-              <Text style={[styles.streakText, { color: colors.textSecondary }]}>
-                {currentStreak} day streak
-              </Text>
+        <View style={styles.avatarRow}>
+          {profile?.avatar_url ? (
+            <Image source={{ uri: profile.avatar_url }} style={styles.avatarCircle} />
+          ) : (
+            <View style={[styles.avatarCircle, { backgroundColor: colors.surface }]}>
+              <Text style={[styles.avatarInitials, { color: colors.primary }]}>{initials}</Text>
             </View>
           )}
+          <View style={styles.bioInfo}>
+            <Text style={[styles.bioName, { color: colors.text }]}>{profile?.username ?? "—"}</Text>
+            {!!profile?.bio && (
+              <Text style={[styles.bioText, { color: colors.textSecondary }]} numberOfLines={2}>
+                {profile.bio}
+              </Text>
+            )}
+            {currentStreak > 0 && (
+              <View style={styles.streakRow}>
+                <Ionicons name="flame" size={16} color="#ff9f0a" />
+                <Text style={[styles.streakText, { color: colors.textSecondary }]}>
+                  {currentStreak} day streak
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* ── Best lifts (squat / deadlift / bench) ── */}
+        <View style={[styles.bestLiftsBlock, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.bestLiftsTitle, { color: colors.textSecondary }]}>BEST LIFTS</Text>
+          <View style={styles.bestLiftsRow}>
+            {([
+              { key: "squat" as const, label: "Squat" },
+              { key: "deadlift" as const, label: "Deadlift" },
+              { key: "bench" as const, label: "Bench" },
+            ]).map((lift, i) => {
+              const raw = bestLifts[lift.key];
+              const display = raw > 0 ? (toDisplay(raw) ?? raw) : "—";
+              return (
+                <View key={lift.key} style={{ flex: 1, flexDirection: "row" }}>
+                  {i > 0 && <View style={[styles.statDivider, { backgroundColor: colors.border }]} />}
+                  <View style={styles.bestLiftCell}>
+                    <Text style={[styles.bestLiftValue, { color: colors.text }]}>{display}</Text>
+                    <Text style={[styles.bestLiftLabel, { color: colors.textSecondary }]}>
+                      {lift.label}{raw > 0 ? ` (${unitLabel})` : ""}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
         </View>
 
         {/* ── Stats row with customize button ── */}
@@ -732,12 +763,14 @@ const styles = StyleSheet.create({
   offlineText: { fontSize: 13, fontWeight: "600", textAlign: "center" },
 
   avatarSection: {
-    flexDirection: "row",
-    alignItems: "center",
     paddingHorizontal: 20,
     paddingVertical: 20,
     gap: 16,
-    flexWrap: "wrap",
+  },
+  avatarRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
   },
   avatarCircle: {
     width: 72, height: 72, borderRadius: 36,
@@ -749,6 +782,25 @@ const styles = StyleSheet.create({
   bioText: { fontSize: 13, marginTop: 3, lineHeight: 18 },
   streakRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
   streakText: { fontSize: 14, fontWeight: "500" },
+
+  bestLiftsBlock: {
+    width: "100%",
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+  },
+  bestLiftsTitle: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+    marginBottom: 10,
+    paddingHorizontal: 8,
+  },
+  bestLiftsRow: { flexDirection: "row", alignItems: "center" },
+  bestLiftCell: { flex: 1, alignItems: "center", paddingVertical: 4 },
+  bestLiftValue: { fontSize: 18, fontWeight: "800" },
+  bestLiftLabel: { fontSize: 11, fontWeight: "500", marginTop: 2 },
 
   statsBlock: { width: "100%" },
   statsBlockHeader: { flexDirection: "row", justifyContent: "flex-end", marginBottom: 6 },

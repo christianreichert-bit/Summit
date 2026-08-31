@@ -124,6 +124,36 @@ let nextSessionId = 1;
 let nextSessionExerciseId = 1;
 let nextSessionSetId = 1;
 
+let localFriendships: { user_id: string; friend_id: string; created_at: string }[] = [];
+let localBlocks: { blocker_id: string; blocked_id: string; created_at: string }[] = [];
+let localFriendInvites: { token: string; user_id: string; created_at: string }[] = [];
+
+function localGenerateToken(): string {
+  return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function localIsBlocked(a: string, b: string): boolean {
+  return localBlocks.some(
+    (bl) => (bl.blocker_id === a && bl.blocked_id === b) || (bl.blocker_id === b && bl.blocked_id === a)
+  );
+}
+
+function localAddFriendshipPair(userA: string, userB: string) {
+  const now = new Date().toISOString();
+  if (!localFriendships.some((f) => f.user_id === userA && f.friend_id === userB)) {
+    localFriendships.push({ user_id: userA, friend_id: userB, created_at: now });
+  }
+  if (!localFriendships.some((f) => f.user_id === userB && f.friend_id === userA)) {
+    localFriendships.push({ user_id: userB, friend_id: userA, created_at: now });
+  }
+}
+
+function localRemoveFriendshipPair(userA: string, userB: string) {
+  localFriendships = localFriendships.filter(
+    (f) => !((f.user_id === userA && f.friend_id === userB) || (f.user_id === userB && f.friend_id === userA))
+  );
+}
+
 export const localDb = {
   // Auth
   signUp: async (email: string, password: string, username: string) => {
@@ -734,5 +764,97 @@ export const localDb = {
       .filter(Boolean);
 
     return { data: history, error: null };
+  },
+
+  createFriendInvite: async (userId: string) => {
+    const token = localGenerateToken();
+    localFriendInvites.push({ token, user_id: userId, created_at: new Date().toISOString() });
+    return { data: { token }, error: null };
+  },
+
+  redeemFriendInvite: async (token: string, redeemerId: string) => {
+    const invite = localFriendInvites.find((i) => i.token === token);
+    if (!invite) return { data: null, error: { message: "Invalid or expired invite link." } };
+    if (invite.user_id === redeemerId) return { data: null, error: { message: "You cannot add yourself as a friend." } };
+    if (localIsBlocked(invite.user_id, redeemerId)) {
+      return { data: null, error: { message: "Unable to accept this invite." } };
+    }
+    localAddFriendshipPair(invite.user_id, redeemerId);
+    return { data: { friend_id: invite.user_id }, error: null };
+  },
+
+  getFriends: async (userId: string) => {
+    const friendIds = new Set<string>();
+    for (const f of localFriendships) {
+      if (f.user_id === userId) friendIds.add(f.friend_id);
+      if (f.friend_id === userId) friendIds.add(f.user_id);
+    }
+    const friends = [...friendIds]
+      .filter((fid) => !localIsBlocked(userId, fid))
+      .map((fid) => {
+        const u = localUsers.find((x) => x.user_id === fid);
+        return {
+          user_id: fid,
+          username: u?.username ?? "User",
+          avatar_url: u?.avatar_url ?? null,
+        };
+      });
+    return { data: friends, error: null };
+  },
+
+  blockUser: async (blockerId: string, blockedId: string) => {
+    if (blockerId === blockedId) return { data: null, error: { message: "Invalid block." } };
+    localBlocks.push({ blocker_id: blockerId, blocked_id: blockedId, created_at: new Date().toISOString() });
+    localRemoveFriendshipPair(blockerId, blockedId);
+    return { data: true, error: null };
+  },
+
+  canViewFriendProfile: async (viewerId: string, targetId: string) => {
+    if (viewerId === targetId) return { data: true, error: null };
+    if (localIsBlocked(viewerId, targetId)) return { data: false, error: null };
+    const isFriend = localFriendships.some(
+      (f) =>
+        (f.user_id === viewerId && f.friend_id === targetId) ||
+        (f.user_id === targetId && f.friend_id === viewerId)
+    );
+    return { data: isFriend, error: null };
+  },
+
+  getFriendProfileSummary: async (viewerId: string, friendId: string) => {
+    const { data: allowed } = await localDb.canViewFriendProfile(viewerId, friendId);
+    if (!allowed) return { data: null, error: { message: "You do not have access to this profile." } };
+    const profile = localUsers.find((u) => u.user_id === friendId);
+    if (!profile) return { data: null, error: { message: "User not found." } };
+    const sessions = localWorkoutSessions
+      .filter((s) => s.user_id === friendId && s.end_time)
+      .sort((a, b) => new Date(b.session_date).getTime() - new Date(a.session_date).getTime());
+    let totalVolume = 0;
+    let totalSets = 0;
+    for (const s of sessions) {
+      const exs = localSessionExercises.filter((e) => e.session_id === s.session_id);
+      for (const ex of exs) {
+        const sets = localSessionExerciseSets.filter((set) => set.session_exercise_id === ex.session_exercise_id && set.completed);
+        totalSets += sets.length;
+        for (const set of sets) {
+          if (set.weight != null && set.reps != null) totalVolume += set.weight * set.reps;
+        }
+      }
+    }
+    return {
+      data: {
+        profile,
+        totalWorkouts: sessions.length,
+        totalSets,
+        totalVolume,
+        recentSessions: sessions.slice(0, 10).map((s) => ({
+          session_id: s.session_id,
+          session_name: s.session_name,
+          session_date: s.session_date,
+          start_time: s.start_time,
+          end_time: s.end_time,
+        })),
+      },
+      error: null,
+    };
   },
 };

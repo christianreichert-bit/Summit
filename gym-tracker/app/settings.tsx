@@ -12,6 +12,7 @@ import { useRestTimer } from "./utils/useRestTimer";
 import { requestNotificationPermissions } from "./utils/notifications";
 import HeightPicker, { feetInchesToInches, inchesToFeetInches } from "./components/HeightPicker";
 import { privacyPolicySections, PRIVACY_POLICY_LAST_UPDATED } from "./utils/privacyPolicy";
+import { medicalDisclaimerSections } from "./utils/medicalDisclaimer";
 
 const NOTIF_KEY = "@gym_tracker_notifications";
 
@@ -638,6 +639,7 @@ export default function SettingsScreen() {
   const [showRoutineHelp, setShowRoutineHelp] = useState(false);
   const [showFAQ, setShowFAQ] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
+  const [showMedicalDisclaimer, setShowMedicalDisclaimer] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
 
   useEffect(() => {
@@ -782,6 +784,7 @@ export default function SettingsScreen() {
         <SettingSection title="Help">
           <SettingItem icon="help-circle-outline" label="Frequently Asked Questions" onPress={() => setShowFAQ(true)} />
           <SettingItem icon="shield-checkmark-outline" label="Privacy Policy" onPress={() => setShowPrivacy(true)} />
+          <SettingItem icon="medical-outline" label="Health & Medical Disclaimer" onPress={() => setShowMedicalDisclaimer(true)} />
           <SettingItem icon="mail-outline" label="Contact Us" onPress={handleContactUs} />
           <SettingItem icon="star-outline" label="Rate the App" onPress={handleRateApp} />
           <SettingItem icon="information-circle-outline" label="About" onPress={() => setShowAbout(true)} />
@@ -824,6 +827,13 @@ export default function SettingsScreen() {
         title="Privacy Policy"
         footer={`Last updated: ${PRIVACY_POLICY_LAST_UPDATED}`}
         sections={privacyPolicySections}
+      />
+      <ContentModal
+        visible={showMedicalDisclaimer}
+        onClose={() => setShowMedicalDisclaimer(false)}
+        title="Health & Medical Disclaimer"
+        footer="This disclaimer is incorporated into our Privacy Policy. By using Summit you acknowledge these terms."
+        sections={medicalDisclaimerSections}
       />
       <AboutModal visible={showAbout} onClose={() => setShowAbout(false)} />
     </View>

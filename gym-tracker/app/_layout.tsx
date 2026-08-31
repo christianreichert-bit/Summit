@@ -6,6 +6,7 @@ import { ThemeProvider, useTheme } from "./theme/ThemeContext";
 import { useSyncManager } from "./utils/useSyncManager";
 import { ActiveWorkoutProvider } from "./utils/ActiveWorkoutContext";
 import MinimizedWorkoutBar from "./components/MinimizedWorkoutBar";
+import { redeemPendingInvite } from "./utils/friendInvite";
 
 function RootNav() {
   const [session, setSession] = useState<any>(null);
@@ -38,14 +39,19 @@ function RootNav() {
   }, []);
 
   useEffect(() => {
+    if (!userId) return;
+    redeemPendingInvite(userId).catch(() => {});
+  }, [userId]);
+
+  useEffect(() => {
     if (loading) return;
 
-    const inAuthScreen =
-      segments[0] === "auth" || segments[0] === "reset-password";
+    const inPublicScreen =
+      segments[0] === "auth" || segments[0] === "reset-password" || segments[0] === "invite";
 
     if (session && segments[0] === "auth") {
       router.replace("/(tabs)");
-    } else if (!session && !inAuthScreen) {
+    } else if (!session && !inPublicScreen) {
       router.replace("/auth");
     }
   }, [session, loading, segments]);
@@ -76,7 +82,9 @@ function RootNav() {
       >
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="auth" />
+        <Stack.Screen name="invite" />
         <Stack.Screen name="reset-password" />
+        <Stack.Screen name="friend/[userId]" options={{ animation: "slide_from_right", animationDuration: 280 }} />
         <Stack.Screen name="workout-edit/[sessionId]" options={{ animation: "slide_from_bottom", animationDuration: 280 }} />
         <Stack.Screen name="workout" options={{ animation: "slide_from_bottom", animationDuration: 280 }} />
         <Stack.Screen name="settings" options={{ animation: "slide_from_bottom", animationDuration: 280 }} />

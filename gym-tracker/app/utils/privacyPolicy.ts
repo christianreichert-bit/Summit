@@ -3,6 +3,8 @@
 export const PRIVACY_POLICY_LAST_UPDATED = "August 31, 2026";
 export const PRIVACY_CONTACT_EMAIL = "cjreichert9@gmail.com";
 
+import { medicalDisclaimerSections } from "./medicalDisclaimer";
+
 export type PolicySection = { heading?: string; body: string };
 
 export const privacyPolicySections: PolicySection[] = [
@@ -12,14 +14,25 @@ export const privacyPolicySections: PolicySection[] = [
       'Summit ("we," "us," or "our") provides a personal workout-tracking mobile and web application (the "App"). This Privacy Policy explains how we collect, use, disclose, and protect information when you use the App. By using the App, you acknowledge this Policy. If you do not agree, please do not use the App.',
   },
   {
+    heading: "Account Registration & Consent",
+    body:
+      "When you create an account, you must affirmatively accept this Privacy Policy (which includes our Health & Medical Disclaimer below) via an in-app checkbox before registration can be completed. By checking that box and creating an account, you acknowledge that you have read, understand, and agree to this Policy and disclaimer.",
+  },
+  ...medicalDisclaimerSections,
+  {
+    heading: "Friends & Social Features",
+    body:
+      "If you use friend invites, you may share a personal invite link with others. When someone accepts your invite and creates an account (or signs in), a mutual friend connection is created so you can view each other's workout progress summaries. You may block any friend at any time; blocking removes the friendship and revokes the blocked user's ability to view your progress. Blocked users cannot re-add you through an old invite unless you choose to unblock them by removing the block (not currently exposed in-app — contact us if needed). Friend features are optional — you are not required to invite anyone or share progress.",
+  },
+  {
     heading: "Important Notice",
     body:
-      "Except where an account email and password are required to create an account, all profile and health-related fields in the App are optional. You may use Summit without providing height, body weight, gender, bio, or progress photos.",
+      "Except where an account email and password are required to create an account, all profile and health-related fields in the App are optional. You may use Summit without providing height, body weight, gender, bio, progress photos, or using friend/social features.",
   },
   {
     heading: "Information We Collect",
     body:
-      "We may collect the following categories of information:\n\n• Account data: email address, username, and authentication credentials (passwords are handled by our authentication provider and are not stored in plain text by us).\n\n• Optional profile data: bio, profile photo, height, body weight, and gender—only if you choose to provide them.\n\n• Workout data: routines, exercises, sets, reps, weights, cardio metrics, session notes, timestamps, and optional progress photos.\n\n• Device and usage data: device type, operating system, app version, and diagnostic logs needed to operate and secure the App.\n\n• Preferences: theme, units (lbs/kg), rest-timer settings, and notification preferences stored on your device or account.",
+      "We may collect the following categories of information:\n\n• Account data: email address, username, and authentication credentials (passwords are handled by our authentication provider and are not stored in plain text by us).\n\n• Optional profile data: bio, profile photo, height, body weight, and gender—only if you choose to provide them.\n\n• Workout data: routines, exercises, sets, reps, weights, cardio metrics, session notes, timestamps, and optional progress photos.\n\n• Friend connections: if you use invite links, we store friendship relationships and block lists to enable social features.\n\n• Device and usage data: device type, operating system, app version, and diagnostic logs needed to operate and secure the App.\n\n• Preferences: theme, units (lbs/kg), rest-timer settings, and notification preferences stored on your device or account.",
   },
   {
     heading: "How We Use Information",

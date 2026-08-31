@@ -965,4 +965,182 @@ export const db = {
     }
     return localDb.getCardioStats(userId);
   },
+
+  // ─── Friends & invites ───────────────────────────────────────────────────────
+
+  createFriendInvite: async (userId: string) => {
+    const token = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 14)}`;
+    if (useSupabase()) {
+      const { data, error } = await supabase
+        .from("friend_invites")
+        .insert({ user_id: userId, token })
+        .select("token")
+        .single();
+      if (error) return { data: null, error };
+      return { data: { token: data.token }, error: null };
+    }
+    return localDb.createFriendInvite(userId);
+  },
+
+  redeemFriendInvite: async (token: string, redeemerId: string) => {
+    if (useSupabase()) {
+      const { data: invite, error: inviteErr } = await supabase
+        .from("friend_invites")
+        .select("user_id, expires_at")
+        .eq("token", token)
+        .maybeSingle();
+      if (inviteErr) return { data: null, error: inviteErr };
+      if (!invite) return { data: null, error: { message: "Invalid or expired invite link." } };
+      if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
+        return { data: null, error: { message: "This invite link has expired." } };
+      }
+      const inviterId = invite.user_id as string;
+      if (inviterId === redeemerId) {
+        return { data: null, error: { message: "You cannot add yourself as a friend." } };
+      }
+
+      const { data: blockCheck } = await supabase
+        .from("user_blocks")
+        .select("blocker_id")
+        .or(`and(blocker_id.eq.${inviterId},blocked_id.eq.${redeemerId}),and(blocker_id.eq.${redeemerId},blocked_id.eq.${inviterId})`)
+        .maybeSingle();
+      if (blockCheck) return { data: null, error: { message: "Unable to accept this invite." } };
+
+      const rows = [
+        { user_id: inviterId, friend_id: redeemerId },
+        { user_id: redeemerId, friend_id: inviterId },
+      ];
+      const { error: friendErr } = await supabase.from("friendships").upsert(rows, { onConflict: "user_id,friend_id" });
+      if (friendErr) return { data: null, error: friendErr };
+      return { data: { friend_id: inviterId }, error: null };
+    }
+    return localDb.redeemFriendInvite(token, redeemerId);
+  },
+
+  getFriends: async (userId: string) => {
+    if (useSupabase()) {
+      const { data: blockedByMe } = await supabase.from("user_blocks").select("blocked_id").eq("blocker_id", userId);
+      const { data: blockedMe } = await supabase.from("user_blocks").select("blocker_id").eq("blocked_id", userId);
+      const blockedIds = new Set([
+        ...(blockedByMe ?? []).map((b: any) => b.blocked_id),
+        ...(blockedMe ?? []).map((b: any) => b.blocker_id),
+      ]);
+
+      const { data: links, error } = await supabase
+        .from("friendships")
+        .select("user_id, friend_id")
+        .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
+      if (error) return { data: null, error };
+
+      const friendIds = new Set<string>();
+      for (const link of links ?? []) {
+        const fid = link.user_id === userId ? link.friend_id : link.user_id;
+        if (!blockedIds.has(fid)) friendIds.add(fid);
+      }
+      if (friendIds.size === 0) return { data: [], error: null };
+
+      const { data: users, error: userErr } = await supabase
+        .from("users")
+        .select("user_id, username, avatar_url")
+        .in("user_id", [...friendIds]);
+      if (userErr) return { data: null, error: userErr };
+      return { data: users ?? [], error: null };
+    }
+    return localDb.getFriends(userId);
+  },
+
+  blockUser: async (blockerId: string, blockedId: string) => {
+    if (blockerId === blockedId) return { data: null, error: { message: "Invalid block." } };
+    if (useSupabase()) {
+      await supabase.from("friendships").delete().or(
+        `and(user_id.eq.${blockerId},friend_id.eq.${blockedId}),and(user_id.eq.${blockedId},friend_id.eq.${blockerId})`
+      );
+      const { error } = await supabase.from("user_blocks").upsert(
+        { blocker_id: blockerId, blocked_id: blockedId },
+        { onConflict: "blocker_id,blocked_id" }
+      );
+      if (error) return { data: null, error };
+      return { data: true, error: null };
+    }
+    return localDb.blockUser(blockerId, blockedId);
+  },
+
+  canViewFriendProfile: async (viewerId: string, targetId: string) => {
+    if (viewerId === targetId) return { data: true, error: null };
+    if (useSupabase()) {
+      const { data: block } = await supabase
+        .from("user_blocks")
+        .select("blocker_id")
+        .or(`and(blocker_id.eq.${targetId},blocked_id.eq.${viewerId}),and(blocker_id.eq.${viewerId},blocked_id.eq.${targetId})`)
+        .maybeSingle();
+      if (block) return { data: false, error: null };
+      const { data: link } = await supabase
+        .from("friendships")
+        .select("friendship_id")
+        .or(`and(user_id.eq.${viewerId},friend_id.eq.${targetId}),and(user_id.eq.${targetId},friend_id.eq.${viewerId})`)
+        .maybeSingle();
+      return { data: !!link, error: null };
+    }
+    return localDb.canViewFriendProfile(viewerId, targetId);
+  },
+
+  getFriendProfileSummary: async (viewerId: string, friendId: string) => {
+    const { data: allowed, error: accessErr } = await db.canViewFriendProfile(viewerId, friendId);
+    if (accessErr) return { data: null, error: accessErr };
+    if (!allowed) return { data: null, error: { message: "You do not have access to this profile." } };
+
+    if (useSupabase()) {
+      const { data: profile, error: profileErr } = await supabase
+        .from("users")
+        .select("user_id, username, avatar_url, bio")
+        .eq("user_id", friendId)
+        .single();
+      if (profileErr || !profile) return { data: null, error: profileErr ?? { message: "User not found." } };
+
+      const { data: sessions } = await supabase
+        .from("workout_sessions")
+        .select("session_id, session_name, session_date, start_time, end_time")
+        .eq("user_id", friendId)
+        .not("end_time", "is", null)
+        .order("session_date", { ascending: false })
+        .limit(10);
+
+      const { data: allSessions } = await supabase
+        .from("workout_sessions")
+        .select("session_id")
+        .eq("user_id", friendId)
+        .not("end_time", "is", null);
+
+      const sessionIds = (allSessions ?? []).map((s: any) => s.session_id);
+      let totalSets = 0;
+      let totalVolume = 0;
+      if (sessionIds.length > 0) {
+        const { data: exercises } = await supabase.from("session_exercises").select("session_exercise_id").in("session_id", sessionIds);
+        const exIds = (exercises ?? []).map((e: any) => e.session_exercise_id);
+        if (exIds.length > 0) {
+          const { data: sets } = await supabase
+            .from("session_exercise_sets")
+            .select("weight, reps, completed")
+            .in("session_exercise_id", exIds)
+            .eq("completed", true);
+          for (const set of sets ?? []) {
+            totalSets++;
+            if (set.weight != null && set.reps != null) totalVolume += set.weight * set.reps;
+          }
+        }
+      }
+
+      return {
+        data: {
+          profile,
+          totalWorkouts: allSessions?.length ?? 0,
+          totalSets,
+          totalVolume,
+          recentSessions: sessions ?? [],
+        },
+        error: null,
+      };
+    }
+    return localDb.getFriendProfileSummary(viewerId, friendId);
+  },
 };

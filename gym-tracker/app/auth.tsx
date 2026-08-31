@@ -2,8 +2,11 @@
 import { ActivityIndicator, Platform, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { db, isOnline } from "./backend/db";
 import { useTheme } from "./theme/ThemeContext";
+import PrivacyPolicyModal from "./components/PrivacyPolicyModal";
+import { redeemPendingInvite } from "./utils/friendInvite";
 
 export default function AuthScreen() {
   const router = useRouter();
@@ -17,6 +20,10 @@ export default function AuthScreen() {
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [resetCooldown, setResetCooldown] = useState(0);
+  const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
+  const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
+
+  const signUpBlocked = mode === "signUp" && !acceptedPrivacy;
 
   const syncStoredUserId = async () => {
     const result = await db.getUser();
@@ -96,6 +103,10 @@ export default function AuthScreen() {
       return;
     }
 
+    if (mode === "signUp" && !acceptedPrivacy) {
+      setError("You must accept the Privacy Policy to create an account.");
+      return;
+    }
     if (!email.trim() || !password.trim()) {
       setError("Email and password are required.");
       return;
@@ -137,6 +148,8 @@ export default function AuthScreen() {
         }
       }
       await syncStoredUserId();
+      const { data: userData } = await db.getUser();
+      if (userData?.user?.id) await redeemPendingInvite(userData.user.id);
       router.replace("/(tabs)");
     } finally {
       setLoading(false);
@@ -295,15 +308,42 @@ export default function AuthScreen() {
             </>
           )}
 
+          {mode === "signUp" && (
+            <View style={styles.consentRow}>
+              <Pressable
+                onPress={() => setAcceptedPrivacy((v) => !v)}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: acceptedPrivacy }}
+                hitSlop={8}
+              >
+                <View style={[
+                  styles.checkbox,
+                  { borderColor: acceptedPrivacy ? colors.primary : colors.border, backgroundColor: acceptedPrivacy ? colors.primary : "transparent" },
+                ]}>
+                  {acceptedPrivacy && <Ionicons name="checkmark" size={14} color="#fff" />}
+                </View>
+              </Pressable>
+              <Text style={[styles.consentText, { color: colors.textSecondary }]}>
+                I accept and acknowledge the{" "}
+                <Text
+                  style={{ color: colors.primary, fontWeight: "700", textDecorationLine: "underline" }}
+                  onPress={() => setShowPrivacyPolicy(true)}
+                >
+                  Privacy Policy
+                </Text>
+              </Text>
+            </View>
+          )}
+
           <Pressable
             style={({ pressed }) => [
               styles.primaryButton,
-              { backgroundColor: colors.primary },
-              pressed && { opacity: 0.85 },
-              loading && { opacity: 0.6 },
+              { backgroundColor: signUpBlocked ? colors.border : colors.primary },
+              pressed && !signUpBlocked && { opacity: 0.85 },
+              (loading || signUpBlocked) && { opacity: 0.6 },
             ]}
             onPress={handleSubmit}
-            disabled={loading}
+            disabled={loading || signUpBlocked}
           >
             {loading ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
@@ -319,6 +359,7 @@ export default function AuthScreen() {
               style={({ pressed }) => [styles.secondaryButton, pressed && { opacity: 0.75 }]}
               onPress={() => {
                 setMode((prev) => (prev === "signIn" ? "signUp" : "signIn"));
+                setAcceptedPrivacy(false);
                 setError(null);
                 setInfo(null);
               }}
@@ -330,6 +371,7 @@ export default function AuthScreen() {
           )}
         </View>
       </View>
+      <PrivacyPolicyModal visible={showPrivacyPolicy} onClose={() => setShowPrivacyPolicy(false)} />
     </SafeAreaView>
   );
 }
@@ -399,5 +441,25 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     fontSize: 14,
     fontWeight: "500",
+  },
+  consentRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginTop: 4,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  consentText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 20,
   },
 });

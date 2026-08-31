@@ -1,11 +1,12 @@
 ﻿import { useEffect, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { db, isOnline } from "./backend/db";
 import { useTheme } from "./theme/ThemeContext";
 import PrivacyPolicyModal from "./components/PrivacyPolicyModal";
+import ExpoGoQrSection from "./components/ExpoGoQrSection";
 import { redeemPendingInvite } from "./utils/friendInvite";
 
 export default function AuthScreen() {
@@ -232,174 +233,189 @@ export default function AuthScreen() {
     }
   };
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={styles.content}>
-        <Text style={[styles.title, { color: colors.text }]}>Welcome to Summit</Text>
-        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          {mode === "signIn"
-            ? "Sign in to continue"
-            : mode === "signUp"
-            ? "Create an account to start tracking"
-            : "Set your new password"}
+  const authBody = (
+    <>
+      <Text style={[styles.title, { color: colors.text }]}>Welcome to Summit</Text>
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+        {mode === "signIn"
+          ? "Sign in to continue"
+          : mode === "signUp"
+          ? "Create an account to start tracking"
+          : "Set your new password"}
+      </Text>
+
+      {!isOnline && (
+        <Text style={{ textAlign: "center", fontWeight: "600", color: colors.warning, marginBottom: 12 }}>
+          Offline Mode
         </Text>
+      )}
 
-        {!isOnline && (
-          <Text style={{ textAlign: "center", fontWeight: "600", color: colors.warning, marginBottom: 12 }}>
-            Offline Mode
-          </Text>
-        )}
-
-        <View style={styles.form}>
-          {mode === "signUp" && (
-            <TextInput
-              style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.inputBackground }]}
-              placeholder="Username"
-              placeholderTextColor={colors.textTertiary}
-              value={username}
-              onChangeText={setUsername}
-              autoCapitalize="none"
-            />
-          )}
-          {mode !== "resetPassword" && (
-            <TextInput
-              style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.inputBackground }]}
-              placeholder="Email"
-              placeholderTextColor={colors.textTertiary}
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
-          )}
+      <View style={styles.form}>
+        {mode === "signUp" && (
           <TextInput
             style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.inputBackground }]}
-            placeholder={mode === "resetPassword" ? "New Password" : "Password"}
+            placeholder="Username"
             placeholderTextColor={colors.textTertiary}
-            value={password}
-            onChangeText={setPassword}
+            value={username}
+            onChangeText={setUsername}
+            autoCapitalize="none"
+          />
+        )}
+        {mode !== "resetPassword" && (
+          <TextInput
+            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.inputBackground }]}
+            placeholder="Email"
+            placeholderTextColor={colors.textTertiary}
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
+        )}
+        <TextInput
+          style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.inputBackground }]}
+          placeholder={mode === "resetPassword" ? "New Password" : "Password"}
+          placeholderTextColor={colors.textTertiary}
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+        />
+        {mode === "resetPassword" && (
+          <TextInput
+            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.inputBackground }]}
+            placeholder="Confirm New Password"
+            placeholderTextColor={colors.textTertiary}
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
             secureTextEntry
           />
-          {mode === "resetPassword" && (
-            <TextInput
-              style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.inputBackground }]}
-              placeholder="Confirm New Password"
-              placeholderTextColor={colors.textTertiary}
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              secureTextEntry
-            />
-          )}
-          {error && <Text style={[styles.error, { color: colors.danger }]}>{error}</Text>}
-          {info && <Text style={[styles.info, { color: colors.success }]}>{info}</Text>}
+        )}
+        {error && <Text style={[styles.error, { color: colors.danger }]}>{error}</Text>}
+        {info && <Text style={[styles.info, { color: colors.success }]}>{info}</Text>}
 
-          {mode === "signIn" && (
-            <>
-              <Pressable
-                style={({ pressed }) => [styles.forgotPasswordButton, pressed && { opacity: 0.75 }]}
-                onPress={handleForgotPassword}
-                disabled={loading || resetCooldown > 0}
-              >
-                <Text style={[styles.forgotPasswordText, { color: colors.primary }]}>
-                  {resetCooldown > 0 ? `Forgot password? (${resetCooldown}s)` : "Forgot password?"}
-                </Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.forgotPasswordButton, pressed && { opacity: 0.75 }]}
-                onPress={handleResendConfirmation}
-                disabled={loading}
-              >
-                <Text style={[styles.forgotPasswordText, { color: colors.primary }]}>
-                  Resend confirmation email
-                </Text>
-              </Pressable>
-            </>
-          )}
-
-          {mode === "signUp" && (
-            <>
-              <View style={styles.consentRow}>
-                <Pressable
-                  onPress={() => setAcceptedAge((v) => !v)}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: acceptedAge }}
-                  hitSlop={8}
-                >
-                  <View style={[
-                    styles.checkbox,
-                    { borderColor: acceptedAge ? colors.primary : colors.border, backgroundColor: acceptedAge ? colors.primary : "transparent" },
-                  ]}>
-                    {acceptedAge && <Ionicons name="checkmark" size={14} color="#fff" />}
-                  </View>
-                </Pressable>
-                <Text style={[styles.consentText, { color: colors.textSecondary }]}>
-                  I confirm I am at least 13 years old (or the minimum age required in my country).
-                </Text>
-              </View>
-              <View style={styles.consentRow}>
-                <Pressable
-                  onPress={() => setAcceptedPrivacy((v) => !v)}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: acceptedPrivacy }}
-                  hitSlop={8}
-                >
-                  <View style={[
-                    styles.checkbox,
-                    { borderColor: acceptedPrivacy ? colors.primary : colors.border, backgroundColor: acceptedPrivacy ? colors.primary : "transparent" },
-                  ]}>
-                    {acceptedPrivacy && <Ionicons name="checkmark" size={14} color="#fff" />}
-                  </View>
-                </Pressable>
-                <Text style={[styles.consentText, { color: colors.textSecondary }]}>
-                  I accept and acknowledge the{" "}
-                  <Text
-                    style={{ color: colors.primary, fontWeight: "700", textDecorationLine: "underline" }}
-                    onPress={() => setShowPrivacyPolicy(true)}
-                  >
-                    Privacy Policy
-                  </Text>
-                </Text>
-              </View>
-            </>
-          )}
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.primaryButton,
-              { backgroundColor: signUpBlocked ? colors.border : colors.primary },
-              pressed && !signUpBlocked && { opacity: 0.85 },
-              (loading || signUpBlocked) && { opacity: 0.6 },
-            ]}
-            onPress={handleSubmit}
-            disabled={loading || signUpBlocked}
-          >
-            {loading ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.primaryButtonText}>
-                {mode === "signIn" ? "Sign In" : mode === "signUp" ? "Create Account" : "Update Password"}
-              </Text>
-            )}
-          </Pressable>
-
-          {mode !== "resetPassword" && (
+        {mode === "signIn" && (
+          <>
             <Pressable
-              style={({ pressed }) => [styles.secondaryButton, pressed && { opacity: 0.75 }]}
-              onPress={() => {
-                setMode((prev) => (prev === "signIn" ? "signUp" : "signIn"));
-                setAcceptedPrivacy(false);
-                setAcceptedAge(false);
-                setError(null);
-                setInfo(null);
-              }}
+              style={({ pressed }) => [styles.forgotPasswordButton, pressed && { opacity: 0.75 }]}
+              onPress={handleForgotPassword}
+              disabled={loading || resetCooldown > 0}
             >
-              <Text style={[styles.secondaryButtonText, { color: colors.textSecondary }]}>
-                {mode === "signIn" ? "Need an account? Sign up" : "Already have an account? Sign in"}
+              <Text style={[styles.forgotPasswordText, { color: colors.primary }]}>
+                {resetCooldown > 0 ? `Forgot password? (${resetCooldown}s)` : "Forgot password?"}
               </Text>
             </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.forgotPasswordButton, pressed && { opacity: 0.75 }]}
+              onPress={handleResendConfirmation}
+              disabled={loading}
+            >
+              <Text style={[styles.forgotPasswordText, { color: colors.primary }]}>
+                Resend confirmation email
+              </Text>
+            </Pressable>
+          </>
+        )}
+
+        {mode === "signUp" && (
+          <>
+            <View style={styles.consentRow}>
+              <Pressable
+                onPress={() => setAcceptedAge((v) => !v)}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: acceptedAge }}
+                hitSlop={8}
+              >
+                <View style={[
+                  styles.checkbox,
+                  { borderColor: acceptedAge ? colors.primary : colors.border, backgroundColor: acceptedAge ? colors.primary : "transparent" },
+                ]}>
+                  {acceptedAge && <Ionicons name="checkmark" size={14} color="#fff" />}
+                </View>
+              </Pressable>
+              <Text style={[styles.consentText, { color: colors.textSecondary }]}>
+                I confirm I am at least 13 years old (or the minimum age required in my country).
+              </Text>
+            </View>
+            <View style={styles.consentRow}>
+              <Pressable
+                onPress={() => setAcceptedPrivacy((v) => !v)}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: acceptedPrivacy }}
+                hitSlop={8}
+              >
+                <View style={[
+                  styles.checkbox,
+                  { borderColor: acceptedPrivacy ? colors.primary : colors.border, backgroundColor: acceptedPrivacy ? colors.primary : "transparent" },
+                ]}>
+                  {acceptedPrivacy && <Ionicons name="checkmark" size={14} color="#fff" />}
+                </View>
+              </Pressable>
+              <Text style={[styles.consentText, { color: colors.textSecondary }]}>
+                I accept and acknowledge the{" "}
+                <Text
+                  style={{ color: colors.primary, fontWeight: "700", textDecorationLine: "underline" }}
+                  onPress={() => setShowPrivacyPolicy(true)}
+                >
+                  Privacy Policy
+                </Text>
+              </Text>
+            </View>
+          </>
+        )}
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.primaryButton,
+            { backgroundColor: signUpBlocked ? colors.border : colors.primary },
+            pressed && !signUpBlocked && { opacity: 0.85 },
+            (loading || signUpBlocked) && { opacity: 0.6 },
+          ]}
+          onPress={handleSubmit}
+          disabled={loading || signUpBlocked}
+        >
+          {loading ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.primaryButtonText}>
+              {mode === "signIn" ? "Sign In" : mode === "signUp" ? "Create Account" : "Update Password"}
+            </Text>
           )}
-        </View>
+        </Pressable>
+
+        {mode !== "resetPassword" && (
+          <Pressable
+            style={({ pressed }) => [styles.secondaryButton, pressed && { opacity: 0.75 }]}
+            onPress={() => {
+              setMode((prev) => (prev === "signIn" ? "signUp" : "signIn"));
+              setAcceptedPrivacy(false);
+              setAcceptedAge(false);
+              setError(null);
+              setInfo(null);
+            }}
+          >
+            <Text style={[styles.secondaryButtonText, { color: colors.textSecondary }]}>
+              {mode === "signIn" ? "Need an account? Sign up" : "Already have an account? Sign in"}
+            </Text>
+          </Pressable>
+        )}
       </View>
+    </>
+  );
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      {Platform.OS === "web" ? (
+        <ScrollView
+          contentContainerStyle={[styles.content, styles.contentWeb]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {authBody}
+          <ExpoGoQrSection webOnly />
+        </ScrollView>
+      ) : (
+        <View style={styles.content}>{authBody}</View>
+      )}
       <PrivacyPolicyModal visible={showPrivacyPolicy} onClose={() => setShowPrivacyPolicy(false)} />
     </SafeAreaView>
   );
@@ -413,6 +429,14 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     paddingHorizontal: 24,
+  },
+  contentWeb: {
+    flexGrow: 1,
+    justifyContent: "center",
+    paddingVertical: 32,
+    maxWidth: 480,
+    width: "100%",
+    alignSelf: "center",
   },
   title: {
     fontSize: 30,

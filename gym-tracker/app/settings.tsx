@@ -1,4 +1,4 @@
-import { Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View, Alert } from "react-native";
+import { Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View, Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
@@ -666,10 +666,21 @@ export default function SettingsScreen() {
 
   const appearanceLabel = mode === "light" ? "Light" : mode === "dark" ? "Dark" : "System";
 
+  const performSignOut = async () => {
+    await db.signOut();
+    router.replace("/auth");
+  };
+
   const handleSignOut = () => {
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm("Are you sure you want to sign out?")) {
+        void performSignOut();
+      }
+      return;
+    }
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
       { text: "Cancel", style: "cancel" },
-      { text: "Sign Out", style: "destructive", onPress: async () => { await db.signOut(); } },
+      { text: "Sign Out", style: "destructive", onPress: () => void performSignOut() },
     ]);
   };
 
@@ -687,7 +698,7 @@ export default function SettingsScreen() {
             "All your routines, workouts, and progress will be lost forever.",
             [
               { text: "Cancel", style: "cancel" },
-              { text: "Yes, Delete", style: "destructive", onPress: async () => { await db.signOut(); } },
+              { text: "Yes, Delete", style: "destructive", onPress: () => void performSignOut() },
             ]
           ),
         },

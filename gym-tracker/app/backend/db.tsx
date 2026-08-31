@@ -1,6 +1,7 @@
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import { localDb } from "./localDb";
 import { networkStatus } from "./networkStatus";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   enqueuePendingSession,
   getPendingQueue,
@@ -126,11 +127,11 @@ export const db = {
   },
 
   signOut: async () => {
-    if (useSupabase()) {
+    if (isSupabaseConfigured) {
       await supabase.auth.signOut();
-    } else {
-      await localDb.signOut();
     }
+    await localDb.signOut();
+    await AsyncStorage.removeItem("userId");
   },
 
   getSession: async () => {

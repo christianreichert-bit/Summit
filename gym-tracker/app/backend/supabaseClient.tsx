@@ -1,8 +1,16 @@
 import { createClient } from "@supabase/supabase-js";
+import Constants from "expo-constants";
 import { Platform } from "react-native";
 
+function readFromExtra(key: string): string | undefined {
+  const extra = Constants.expoConfig?.extra ?? (Constants.manifest as { extra?: Record<string, string> } | null)?.extra;
+  const raw = extra?.[key];
+  if (typeof raw === "string" && raw.trim() && raw !== "undefined") return raw.trim();
+  return undefined;
+}
+
 function readSupabaseUrl(): string | undefined {
-  const raw = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim();
+  const raw = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? readFromExtra("EXPO_PUBLIC_SUPABASE_URL"))?.trim();
   if (!raw || raw === "undefined") return undefined;
   try {
     const u = new URL(raw);
@@ -14,7 +22,7 @@ function readSupabaseUrl(): string | undefined {
 }
 
 function readSupabaseAnonKey(): string | undefined {
-  const raw = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  const raw = (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? readFromExtra("EXPO_PUBLIC_SUPABASE_ANON_KEY"))?.trim();
   if (!raw || raw === "undefined") return undefined;
   return raw;
 }

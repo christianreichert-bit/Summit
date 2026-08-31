@@ -1,6 +1,6 @@
 {
   "name": "gym-tracker",
-  "main": "expo-router/entry",
+  "main": "./App",
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",

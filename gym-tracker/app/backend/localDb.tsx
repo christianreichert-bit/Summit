@@ -5,6 +5,11 @@ type User = {
   username: string;
   email: string;
   created_at: string;
+  bio?: string | null;
+  avatar_url?: string | null;
+  height_inches?: number | null;
+  body_weight_lbs?: number | null;
+  gender?: "male" | "female" | null;
 };
 
 type Routine = {
@@ -15,12 +20,15 @@ type Routine = {
   created_at: string;
 };
 
+type ExerciseType = 'strength' | 'cardio' | 'stretching';
+
 type RoutineExercise = {
   routine_exercise_id: number;
   routine_id: number;
   exercise_id: string;
   exercise_name: string;
   exercise_order: number;
+  exercise_type: ExerciseType;
 };
 
 type RoutineExerciseSet = {
@@ -30,6 +38,9 @@ type RoutineExerciseSet = {
   target_weight: number | null;
   target_reps: number | null;
   is_warmup: boolean;
+  target_duration_seconds: number | null;
+  target_distance_meters: number | null;
+  target_effort_level: number | null;
 };
 
 type WorkoutSession = {
@@ -40,6 +51,7 @@ type WorkoutSession = {
   start_time: string;         // time (HH:MM:SS)
   end_time: string | null;    // time (HH:MM:SS)
   notes: string | null;
+  photo_url: string | null;
   created_at: string;
   user_id: string;
 };
@@ -51,6 +63,7 @@ type SessionExercise = {
   exercise_name: string;
   exercise_order: number;
   notes: string | null;
+  exercise_type: ExerciseType;
 };
 
 type SessionExerciseSet = {
@@ -61,6 +74,11 @@ type SessionExerciseSet = {
   reps: number | null;
   is_warmup: boolean;
   completed: boolean;
+  duration_seconds: number | null;
+  distance_meters: number | null;
+  pace_sec_per_km: number | null;
+  calories: number | null;
+  effort_level: number | null;
 };
 
 let localUsers: User[] = [];
@@ -79,6 +97,10 @@ type PersonalRecord = {
   max_weight: number | null;
   max_volume: number | null;
   achieved_at: string;
+  pr_type: 'strength' | 'cardio';
+  best_distance_meters: number | null;
+  best_pace_sec_per_km: number | null;
+  best_duration_seconds: number | null;
 };
 
 type CustomExercise = {
@@ -88,6 +110,7 @@ type CustomExercise = {
   primary_muscle: string | null;
   equipment: string | null;
   created_at: string;
+  exercise_type: ExerciseType;
 };
 
 let localPersonalRecords: PersonalRecord[] = [];
@@ -126,10 +149,7 @@ export const localDb = {
   },
 
   requestPasswordReset: async (_email: string) => {
-    return {
-      data: null,
-      error: { message: "Password reset email requires an internet connection." },
-    };
+    return { data: null, error: { message: "Password reset requires an internet connection." } };
   },
 
   signOut: async () => {
@@ -149,7 +169,17 @@ export const localDb = {
     return { data: user, error: user ? null : { message: "User not found" } };
   },
 
-  updateUserProfile: async (userId: string, updates: { username?: string; bio?: string | null; avatar_url?: string | null }) => {
+  updateUserProfile: async (
+    userId: string,
+    updates: {
+      username?: string;
+      bio?: string | null;
+      avatar_url?: string | null;
+      height_inches?: number | null;
+      body_weight_lbs?: number | null;
+      gender?: "male" | "female" | null;
+    }
+  ) => {
     const user = localUsers.find((u) => u.user_id === userId);
     if (!user) return { data: null, error: { message: "User not found" } };
     Object.assign(user, updates);
@@ -225,9 +255,11 @@ export const localDb = {
     exercise_id: string;
     exercise_name: string;
     exercise_order: number;
+    exercise_type?: ExerciseType;
   }) => {
     const newExercise: RoutineExercise = {
       routine_exercise_id: nextRoutineExerciseId++,
+      exercise_type: 'strength',
       ...exercise,
     };
     localRoutineExercises.push(newExercise);
@@ -266,9 +298,15 @@ export const localDb = {
     target_weight: number | null;
     target_reps: number | null;
     is_warmup: boolean;
+    target_duration_seconds?: number | null;
+    target_distance_meters?: number | null;
+    target_effort_level?: number | null;
   }) => {
     const newSet: RoutineExerciseSet = {
       routine_set_id: nextRoutineSetId++,
+      target_duration_seconds: null,
+      target_distance_meters: null,
+      target_effort_level: null,
       ...set,
     };
     localRoutineExerciseSets.push(newSet);
@@ -284,7 +322,7 @@ export const localDb = {
 
   updateRoutineExerciseSet: async (
     routineSetId: number,
-    updates: { target_reps?: number | null; target_weight?: number | null; is_warmup?: boolean }
+    updates: { target_reps?: number | null; target_weight?: number | null; is_warmup?: boolean; target_duration_seconds?: number | null; target_distance_meters?: number | null; target_effort_level?: number | null }
   ) => {
     localRoutineExerciseSets = localRoutineExerciseSets.map((s) =>
       s.routine_set_id === routineSetId ? { ...s, ...updates } : s
@@ -309,6 +347,7 @@ export const localDb = {
       start_time: now.toTimeString().split(" ")[0],
       end_time: null,
       notes: null,
+      photo_url: null,
       created_at: now.toISOString(),
       user_id: params.user_id,
     };
@@ -357,6 +396,14 @@ export const localDb = {
     return { error: null };
   },
 
+  // Save a progress photo URI (local file URI for offline sessions)
+  updateSessionPhotoUrl: async (sessionId: number, photoUrl: string | null) => {
+    localWorkoutSessions = localWorkoutSessions.map((s) =>
+      s.session_id === sessionId ? { ...s, photo_url: photoUrl } : s
+    );
+    return { error: null };
+  },
+
   // Delete a session and all its exercises/sets
   deleteWorkoutSession: async (sessionId: number) => {
     const exerciseIds = localSessionExercises
@@ -385,9 +432,11 @@ export const localDb = {
     exercise_name: string;
     exercise_order: number;
     notes: string | null;
+    exercise_type?: ExerciseType;
   }) => {
     const newExercise: SessionExercise = {
       session_exercise_id: nextSessionExerciseId++,
+      exercise_type: 'strength',
       ...exercise,
     };
     localSessionExercises.push(newExercise);
@@ -427,10 +476,20 @@ export const localDb = {
     reps: number | null;
     is_warmup: boolean;
     completed?: boolean;
+    duration_seconds?: number | null;
+    distance_meters?: number | null;
+    pace_sec_per_km?: number | null;
+    calories?: number | null;
+    effort_level?: number | null;
   }) => {
     const newSet: SessionExerciseSet = {
       session_set_id: nextSessionSetId++,
       completed: false,
+      duration_seconds: null,
+      distance_meters: null,
+      pace_sec_per_km: null,
+      calories: null,
+      effort_level: null,
       ...set,
     };
     localSessionExerciseSets.push(newSet);
@@ -439,7 +498,7 @@ export const localDb = {
 
   updateSessionExerciseSet: async (
     sessionSetId: number,
-    updates: { reps?: number | null; weight?: number | null; is_warmup?: boolean; completed?: boolean }
+    updates: { reps?: number | null; weight?: number | null; is_warmup?: boolean; completed?: boolean; duration_seconds?: number | null; distance_meters?: number | null; pace_sec_per_km?: number | null; calories?: number | null; effort_level?: number | null }
   ) => {
     localSessionExerciseSets = localSessionExerciseSets.map((s) =>
       s.session_set_id === sessionSetId ? { ...s, ...updates } : s
@@ -470,6 +529,7 @@ export const localDb = {
       start_time: now.toTimeString().split(" ")[0],
       end_time: null,
       notes: null,
+      photo_url: null,
       created_at: now.toISOString(),
       user_id: userId,
     };
@@ -488,6 +548,7 @@ export const localDb = {
         exercise_name: re.exercise_name,
         exercise_order: re.exercise_order,
         notes: null,
+        exercise_type: re.exercise_type ?? 'strength',
       };
       localSessionExercises.push(sessionExercise);
 
@@ -505,6 +566,11 @@ export const localDb = {
           reps: ts.target_reps,
           is_warmup: ts.is_warmup,
           completed: false,
+          duration_seconds: ts.target_duration_seconds ?? null,
+          distance_meters: ts.target_distance_meters ?? null,
+          pace_sec_per_km: null,
+          calories: null,
+          effort_level: ts.target_effort_level ?? null,
         };
         localSessionExerciseSets.push(sessionSet);
       }
@@ -540,20 +606,32 @@ export const localDb = {
     exercise_id: string;
     max_weight: number | null;
     max_volume: number | null;
+    pr_type?: 'strength' | 'cardio';
+    best_distance_meters?: number | null;
+    best_pace_sec_per_km?: number | null;
+    best_duration_seconds?: number | null;
   }) => {
+    const prType = record.pr_type ?? 'strength';
     const existing = localPersonalRecords.findIndex(
-      (r) => r.user_id === record.user_id && r.exercise_id === record.exercise_id
+      (r) => r.user_id === record.user_id && r.exercise_id === record.exercise_id && r.pr_type === prType
     );
     if (existing >= 0) {
       localPersonalRecords[existing] = {
         ...localPersonalRecords[existing],
         max_weight: record.max_weight,
         max_volume: record.max_volume,
+        best_distance_meters: record.best_distance_meters ?? null,
+        best_pace_sec_per_km: record.best_pace_sec_per_km ?? null,
+        best_duration_seconds: record.best_duration_seconds ?? null,
         achieved_at: new Date().toISOString(),
       };
     } else {
       localPersonalRecords.push({
         pr_id: nextPrId++,
+        pr_type: prType,
+        best_distance_meters: record.best_distance_meters ?? null,
+        best_pace_sec_per_km: record.best_pace_sec_per_km ?? null,
+        best_duration_seconds: record.best_duration_seconds ?? null,
         ...record,
         achieved_at: new Date().toISOString(),
       });
@@ -573,14 +651,67 @@ export const localDb = {
     name: string;
     primary_muscle: string | null;
     equipment: string | null;
+    exercise_type?: ExerciseType;
   }) => {
-    localCustomExercises.push({ ...exercise, created_at: new Date().toISOString() });
+    localCustomExercises.push({ exercise_type: 'strength', ...exercise, created_at: new Date().toISOString() });
     return { error: null };
   },
 
   deleteCustomExercise: async (exerciseId: string) => {
     localCustomExercises = localCustomExercises.filter((e) => e.exercise_id !== exerciseId);
     return { error: null };
+  },
+
+  // Cardio aggregate stats for a user
+  getCardioStats: async (userId: string) => {
+    const userSessions = localWorkoutSessions.filter(
+      (s) => s.user_id === userId && s.end_time !== null
+    );
+    const sessionIds = new Set(userSessions.map((s) => s.session_id));
+
+    const cardioExerciseIds = new Set(
+      localSessionExercises
+        .filter((e) => sessionIds.has(e.session_id) && e.exercise_type === 'cardio')
+        .map((e) => e.session_exercise_id)
+    );
+
+    const cardioSets = localSessionExerciseSets.filter(
+      (s) => cardioExerciseIds.has(s.session_exercise_id) && s.completed &&
+        (s.duration_seconds != null || s.distance_meters != null)
+    );
+
+    let totalDistanceMeters = 0;
+    let totalDurationSeconds = 0;
+    let longestRunMeters = 0;
+    let fastestPaceSecPerKm: number | null = null;
+
+    for (const s of cardioSets) {
+      totalDistanceMeters += s.distance_meters ?? 0;
+      totalDurationSeconds += s.duration_seconds ?? 0;
+      if ((s.distance_meters ?? 0) > longestRunMeters) longestRunMeters = s.distance_meters!;
+      const pace = s.pace_sec_per_km;
+      if (pace != null && pace > 0) {
+        if (fastestPaceSecPerKm === null || pace < fastestPaceSecPerKm) fastestPaceSecPerKm = pace;
+      }
+    }
+
+    // Count distinct sessions that contain at least one cardio exercise
+    const cardioSessionIds = new Set(
+      localSessionExercises
+        .filter((e) => sessionIds.has(e.session_id) && e.exercise_type === 'cardio')
+        .map((e) => e.session_id)
+    );
+
+    return {
+      data: {
+        totalDistanceMeters,
+        totalDurationSeconds,
+        totalCardioSessions: cardioSessionIds.size,
+        longestRunMeters,
+        fastestPaceSecPerKm,
+      },
+      error: null,
+    };
   },
 
   // Exercise history for progression charts

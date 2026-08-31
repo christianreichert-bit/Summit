@@ -10,6 +10,7 @@ export default function TabsLayout() {
 
   const screenOptions = useMemo(() => ({
     headerShown: false,
+    sceneContainerStyle: { backgroundColor: colors.background },
     tabBarStyle: {
       backgroundColor: colors.tabBar,
       borderTopWidth: 1,
@@ -34,15 +35,6 @@ export default function TabsLayout() {
           title: "Workouts",
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "barbell" : "barbell-outline"} size={24} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="routines"
-        options={{
-          title: "Routines",
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "list" : "list-outline"} size={24} color={color} />
           ),
         }}
       />

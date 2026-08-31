@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -25,12 +25,8 @@ export default function AuthScreen() {
     }
 
     const currentUserId: string | undefined = result.data?.user?.id;
-    console.log("Current user ID from DB:", currentUserId);
     if (currentUserId) {
-      console.log("Storing user ID in AsyncStorage:", currentUserId);
       await AsyncStorage.setItem("userId", currentUserId);
-      const testUserId = await AsyncStorage.getItem("userId");
-      console.log("Verified stored user ID from AsyncStorage:", testUserId);
     }
   };
 
@@ -226,6 +222,12 @@ export default function AuthScreen() {
             ? "Create an account to start tracking"
             : "Set your new password"}
         </Text>
+
+        {!isOnline && (
+          <Text style={{ textAlign: "center", fontWeight: "600", color: colors.warning, marginBottom: 12 }}>
+            Offline Mode
+          </Text>
+        )}
 
         <View style={styles.form}>
           {mode === "signUp" && (

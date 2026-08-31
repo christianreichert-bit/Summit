@@ -12,10 +12,6 @@ import {
 } from "./offlineQueue";
 
 export const isOnline = isSupabaseConfigured;
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
-
-
 
 // useSupabase = Supabase configured AND network available (runtime check)
 const useSupabase = () => isOnline && networkStatus.isConnected;
@@ -83,8 +79,6 @@ export const db = {
         },
       });
       if (signUpError) return { data: null, error: signUpError };
-      // Profile row is created by DB trigger (see supabase/fix-signup.sql).
-      // Only upsert here when we already have a session (email confirmation off).
       if (data.user && data.session) {
         const { error: insertError } = await supabase.from("users").upsert(
           {
@@ -160,7 +154,17 @@ export const db = {
     return localDb.getUserProfile(userId);
   },
 
-  updateUserProfile: async (userId: string, updates: { username?: string; bio?: string | null; avatar_url?: string | null }) => {
+  updateUserProfile: async (
+    userId: string,
+    updates: {
+      username?: string;
+      bio?: string | null;
+      avatar_url?: string | null;
+      height_inches?: number | null;
+      body_weight_lbs?: number | null;
+      gender?: "male" | "female" | null;
+    }
+  ) => {
     if (useSupabase()) {
       return supabase.from("users").update(updates).eq("user_id", userId);
     }
@@ -187,6 +191,32 @@ export const db = {
     } catch (e: any) {
       return { url: null, error: e.message ?? "Upload failed" };
     }
+  },
+
+  uploadProgressPhoto: async (userId: string, sessionId: number, uri: string): Promise<{ url: string | null; error: string | null }> => {
+    if (!useSupabase()) return { url: null, error: "Requires internet connection" };
+    try {
+      const ext = (uri.split(".").pop()?.split("?")[0]?.toLowerCase()) ?? "jpg";
+      const mimeType = ext === "png" ? "image/png" : ext === "gif" ? "image/gif" : "image/jpeg";
+      const path = `${userId}/${sessionId}.${ext}`;
+      const formData = new FormData();
+      formData.append("file", { uri, name: `progress.${ext}`, type: mimeType } as any);
+      const { error: uploadError } = await supabase.storage
+        .from("progress-photos")
+        .upload(path, formData, { upsert: true, contentType: mimeType });
+      if (uploadError) return { url: null, error: uploadError.message };
+      const { data } = supabase.storage.from("progress-photos").getPublicUrl(path);
+      return { url: `${data.publicUrl}?t=${Date.now()}`, error: null };
+    } catch (e: any) {
+      return { url: null, error: e.message ?? "Upload failed" };
+    }
+  },
+
+  updateSessionPhotoUrl: async (sessionId: number, photoUrl: string | null) => {
+    if (useSupabase()) {
+      return supabase.from("workout_sessions").update({ photo_url: photoUrl }).eq("session_id", sessionId);
+    }
+    return localDb.updateSessionPhotoUrl(sessionId, photoUrl);
   },
 
   changePassword: async (newPassword: string) => {
@@ -257,9 +287,10 @@ export const db = {
     exercise_id: string;
     exercise_name: string;
     exercise_order: number;
+    exercise_type?: 'strength' | 'cardio' | 'stretching';
   }) => {
     if (useSupabase()) {
-      return supabase.from("routine_exercises").insert(exercise);
+      return supabase.from("routine_exercises").insert({ exercise_type: 'strength', ...exercise });
     }
     return localDb.insertRoutineExercise(exercise);
   },
@@ -296,6 +327,9 @@ export const db = {
     target_weight: number | null;
     target_reps: number | null;
     is_warmup: boolean;
+    target_duration_seconds?: number | null;
+    target_distance_meters?: number | null;
+    target_effort_level?: number | null;
   }) => {
     if (useSupabase()) {
       return supabase.from("routine_exercise_sets").insert(set);
@@ -312,7 +346,7 @@ export const db = {
 
   updateRoutineExerciseSet: async (
     routineSetId: number,
-    updates: { target_reps?: number | null; target_weight?: number | null; is_warmup?: boolean }
+    updates: { target_reps?: number | null; target_weight?: number | null; is_warmup?: boolean; target_duration_seconds?: number | null; target_distance_meters?: number | null; target_effort_level?: number | null }
   ) => {
     if (useSupabase()) {
       return supabase
@@ -380,6 +414,7 @@ export const db = {
             exercise_name: ex.exercise_name,
             exercise_order: ex.exercise_order,
             notes: ex.notes,
+            exercise_type: (ex as any).exercise_type ?? 'strength',
           })),
           sets,
         });
@@ -387,6 +422,94 @@ export const db = {
     }
     await clearSessionOrigin();
     return result;
+  },
+
+  // Sync completed session sets back to the routine template targets.
+  // Called after finishing a workout so the routine reflects what was actually done.
+  syncSessionSetsToRoutine: async (sessionId: number, routineId: number) => {
+    if (useSupabase()) {
+      // Fetch session exercises + routine exercises in parallel
+      const [{ data: sessionExercises }, { data: routineExercises }] = await Promise.all([
+        supabase.from("session_exercises").select("*").eq("session_id", sessionId),
+        supabase.from("routine_exercises").select("*").eq("routine_id", routineId),
+      ]);
+      if (!sessionExercises?.length || !routineExercises?.length) return;
+
+      const sessionExIds = sessionExercises.map((e: any) => e.session_exercise_id);
+      const routineExIds = routineExercises.map((e: any) => e.routine_exercise_id);
+
+      // Fetch all sets in parallel
+      const [{ data: sessionSets }, { data: routineSets }] = await Promise.all([
+        supabase.from("session_exercise_sets").select("*").in("session_exercise_id", sessionExIds),
+        supabase.from("routine_exercise_sets").select("*").in("routine_exercise_id", routineExIds),
+      ]);
+
+      // Build lookup: routineExerciseId:setNumber → routineSetId
+      const routineSetMap = new Map<string, number>();
+      for (const rs of routineSets ?? []) {
+        routineSetMap.set(`${rs.routine_exercise_id}:${rs.set_number}`, rs.routine_set_id);
+      }
+
+      // Map exercise_id → routine exercise
+      const routineExByExId = new Map((routineExercises ?? []).map((e: any) => [e.exercise_id, e]));
+
+      const updates: PromiseLike<any>[] = [];
+      for (const sessionEx of sessionExercises) {
+        const routineEx = routineExByExId.get(sessionEx.exercise_id);
+        if (!routineEx) continue;
+
+        const completedSets = (sessionSets ?? []).filter(
+          (s: any) => s.session_exercise_id === sessionEx.session_exercise_id && s.completed
+        );
+        for (const ss of completedSets) {
+          const routineSetId = routineSetMap.get(`${routineEx.routine_exercise_id}:${ss.set_number}`);
+          if (routineSetId == null) continue;
+
+          const payload =
+            sessionEx.exercise_type === "cardio"
+              ? { target_distance_meters: ss.distance_meters ?? null, target_duration_seconds: ss.duration_seconds ?? null }
+              : { target_weight: ss.weight ?? null, target_reps: ss.reps ?? null };
+
+          updates.push(
+            supabase.from("routine_exercise_sets").update(payload).eq("routine_set_id", routineSetId)
+          );
+        }
+      }
+      await Promise.all(updates);
+      return;
+    }
+
+    // Local fallback — delegate row-by-row via existing updateRoutineExerciseSet
+    const [{ data: sessionExercises }, { data: routineExercises }] = await Promise.all([
+      localDb.getSessionExercises(sessionId),
+      localDb.getRoutineExercises(routineId),
+    ]);
+    if (!sessionExercises?.length || !routineExercises?.length) return;
+
+    const routineExByExId = new Map((routineExercises ?? []).map((e: any) => [e.exercise_id, e]));
+
+    for (const sessionEx of sessionExercises) {
+      const routineEx = routineExByExId.get(sessionEx.exercise_id);
+      if (!routineEx) continue;
+
+      const { data: sessionSets } = await localDb.getSessionExerciseSets(sessionEx.session_exercise_id);
+      const { data: routineSets } = await localDb.getRoutineExerciseSets(routineEx.routine_exercise_id);
+      const routineSetMap = new Map<number, number>(
+        (routineSets ?? []).map((rs: any) => [rs.set_number, rs.routine_set_id])
+      );
+
+      for (const ss of (sessionSets ?? []).filter((s: any) => s.completed)) {
+        const routineSetId = routineSetMap.get(ss.set_number);
+        if (routineSetId == null) continue;
+
+        const payload =
+          sessionEx.exercise_type === "cardio"
+            ? { target_distance_meters: ss.distance_meters ?? null, target_duration_seconds: ss.duration_seconds ?? null }
+            : { target_weight: ss.weight ?? null, target_reps: ss.reps ?? null };
+
+        await localDb.updateRoutineExerciseSet(routineSetId, payload);
+      }
+    }
   },
 
   getWorkoutSessions: async (userId: string) => {
@@ -459,7 +582,7 @@ export const db = {
     return localDb.getSessionExercises(sessionId);
   },
 
-  insertSessionExercise: async (exercise: { session_id: number; exercise_id: string; exercise_name: string; exercise_order: number; notes: string | null; exercise_type?: string }) => {
+  insertSessionExercise: async (exercise: { session_id: number; exercise_id: string; exercise_name: string; exercise_order: number; notes: string | null; exercise_type?: 'strength' | 'cardio' | 'stretching' }) => {
     if (useSupabase()) {
       return supabase.from("session_exercises").insert(buildSessionExerciseInsert(exercise)).select().single();
     }
@@ -492,14 +615,14 @@ export const db = {
     return localDb.getSessionExerciseSets(sessionExerciseId);
   },
 
-  insertSessionExerciseSet: async (set: { session_exercise_id: number; set_number: number; weight: number | null; reps: number | null; is_warmup: boolean; completed?: boolean }) => {
+  insertSessionExerciseSet: async (set: { session_exercise_id: number; set_number: number; weight: number | null; reps: number | null; is_warmup: boolean; completed?: boolean; duration_seconds?: number | null; distance_meters?: number | null; pace_sec_per_km?: number | null; calories?: number | null; effort_level?: number | null }) => {
     if (useSupabase()) {
       return supabase.from("session_exercise_sets").insert(set).select().single();
     }
     return localDb.insertSessionExerciseSet(set);
   },
 
-  updateSessionExerciseSet: async (sessionSetId: number, updates: { reps?: number | null; weight?: number | null; is_warmup?: boolean; completed?: boolean }) => {
+  updateSessionExerciseSet: async (sessionSetId: number, updates: { reps?: number | null; weight?: number | null; is_warmup?: boolean; completed?: boolean; duration_seconds?: number | null; distance_meters?: number | null; pace_sec_per_km?: number | null; calories?: number | null; effort_level?: number | null }) => {
     if (useSupabase()) {
       return supabase.from("session_exercise_sets").update(updates).eq("session_set_id", sessionSetId);
     }
@@ -544,15 +667,14 @@ export const db = {
       if ((exercises ?? []).length === 0) return { data: session, error: null };
 
       // Round 3: batch insert all session exercises at once
-      const exerciseInserts = (exercises ?? []).map((ex: any) =>
-        buildSessionExerciseInsert({
-          session_id: session.session_id,
-          exercise_id: ex.exercise_id,
-          exercise_name: ex.exercise_name,
-          exercise_order: ex.exercise_order,
-          notes: null,
-        })
-      );
+      const exerciseInserts = (exercises ?? []).map((ex: any) => ({
+        session_id: session.session_id,
+        exercise_id: ex.exercise_id,
+        exercise_name: ex.exercise_name,
+        exercise_order: ex.exercise_order,
+        notes: null,
+        exercise_type: ex.exercise_type ?? 'strength',
+      }));
       const { data: sessionExercises, error: exErr } = await supabase
         .from("session_exercises").insert(exerciseInserts).select();
       if (exErr) return { data: null, error: exErr };
@@ -568,9 +690,12 @@ export const db = {
           setInserts.push({
             session_exercise_id: sessionEx.session_exercise_id,
             set_number: ts.set_number,
-            weight: ts.target_weight,
-            reps: ts.target_reps,
+            weight: ts.target_weight ?? null,
+            reps: ts.target_reps ?? null,
             is_warmup: ts.is_warmup,
+            duration_seconds: ts.target_duration_seconds ?? null,
+            distance_meters: ts.target_distance_meters ?? null,
+            effort_level: ts.target_effort_level ?? null,
           });
         }
       });
@@ -622,9 +747,16 @@ export const db = {
     exercise_id: string;
     max_weight: number | null;
     max_volume: number | null;
+    pr_type?: 'strength' | 'cardio';
+    best_distance_meters?: number | null;
+    best_pace_sec_per_km?: number | null;
+    best_duration_seconds?: number | null;
   }) => {
     if (useSupabase()) {
-      return supabase.from("personal_records").upsert(record, { onConflict: "user_id,exercise_id" });
+      return supabase.from("personal_records").upsert(
+        { pr_type: 'strength', ...record },
+        { onConflict: "user_id,exercise_id,pr_type" }
+      );
     }
     return localDb.upsertPersonalRecord(record);
   },
@@ -643,9 +775,10 @@ export const db = {
     name: string;
     primary_muscle: string | null;
     equipment: string | null;
+    exercise_type?: 'strength' | 'cardio' | 'stretching';
   }) => {
     if (useSupabase()) {
-      return supabase.from("custom_exercises").insert(exercise);
+      return supabase.from("custom_exercises").insert({ exercise_type: 'strength', ...exercise });
     }
     return localDb.insertCustomExercise(exercise);
   },
@@ -739,15 +872,14 @@ export const db = {
         for (const ex of exercises) {
           const { data: newEx, error: exErr } = await supabase
             .from("session_exercises")
-            .insert(
-              buildSessionExerciseInsert({
-                session_id: newSession.session_id,
-                exercise_id: ex.exercise_id,
-                exercise_name: ex.exercise_name,
-                exercise_order: ex.exercise_order,
-                notes: ex.notes,
-              })
-            )
+            .insert({
+              session_id: newSession.session_id,
+              exercise_id: ex.exercise_id,
+              exercise_name: ex.exercise_name,
+              exercise_order: ex.exercise_order,
+              notes: ex.notes,
+              exercise_type: (ex as any).exercise_type ?? 'strength',
+            })
             .select()
             .single();
           if (!exErr && newEx) exIdMap[ex.session_exercise_id] = newEx.session_exercise_id;
@@ -763,6 +895,11 @@ export const db = {
             reps: s.reps,
             is_warmup: s.is_warmup,
             completed: s.completed,
+            duration_seconds: (s as any).duration_seconds ?? null,
+            distance_meters: (s as any).distance_meters ?? null,
+            pace_sec_per_km: (s as any).pace_sec_per_km ?? null,
+            calories: (s as any).calories ?? null,
+            effort_level: (s as any).effort_level ?? null,
           }));
         if (setsToInsert.length > 0) {
           await supabase.from("session_exercise_sets").insert(setsToInsert);
@@ -780,4 +917,52 @@ export const db = {
   },
 
   getPendingSessionCount: async (): Promise<number> => getPendingCount(),
+
+  // Cardio aggregate stats
+  getCardioStats: async (userId: string) => {
+    if (useSupabase()) {
+      // Fetch all cardio session exercises for this user's completed sessions
+      const { data: cardioExercises } = await supabase
+        .from("session_exercises")
+        .select("session_exercise_id, workout_sessions!inner(user_id, end_time)")
+        .eq("exercise_type", "cardio")
+        .eq("workout_sessions.user_id", userId)
+        .not("workout_sessions.end_time", "is", null);
+
+      if (!cardioExercises || cardioExercises.length === 0) {
+        return { data: { totalDistanceMeters: 0, totalDurationSeconds: 0, totalCardioSessions: 0, longestRunMeters: 0, fastestPaceSecPerKm: null }, error: null };
+      }
+
+      const exerciseIds = cardioExercises.map((e: any) => e.session_exercise_id);
+      const { data: sets } = await supabase
+        .from("session_exercise_sets")
+        .select("*")
+        .in("session_exercise_id", exerciseIds)
+        .eq("completed", true);
+
+      let totalDistanceMeters = 0;
+      let totalDurationSeconds = 0;
+      let longestRunMeters = 0;
+      let fastestPaceSecPerKm: number | null = null;
+      const sessionIds = new Set<number>();
+
+      for (const s of sets ?? []) {
+        if (!s.duration_seconds && !s.distance_meters) continue;
+        totalDistanceMeters += s.distance_meters ?? 0;
+        totalDurationSeconds += s.duration_seconds ?? 0;
+        if ((s.distance_meters ?? 0) > longestRunMeters) longestRunMeters = s.distance_meters;
+        if (s.pace_sec_per_km && s.pace_sec_per_km > 0) {
+          if (fastestPaceSecPerKm === null || s.pace_sec_per_km < fastestPaceSecPerKm) fastestPaceSecPerKm = s.pace_sec_per_km;
+        }
+      }
+
+      // Count distinct sessions with cardio
+      for (const e of cardioExercises) {
+        sessionIds.add((e as any).workout_sessions?.session_id);
+      }
+
+      return { data: { totalDistanceMeters, totalDurationSeconds, totalCardioSessions: sessionIds.size, longestRunMeters, fastestPaceSecPerKm }, error: null };
+    }
+    return localDb.getCardioStats(userId);
+  },
 };

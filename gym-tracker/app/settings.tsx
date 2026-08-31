@@ -10,6 +10,8 @@ import { useTheme } from "./theme/ThemeContext";
 import { useUnits, UnitSystem } from "./utils/units";
 import { useRestTimer } from "./utils/useRestTimer";
 import { requestNotificationPermissions } from "./utils/notifications";
+import HeightPicker, { feetInchesToInches, inchesToFeetInches } from "./components/HeightPicker";
+import { privacyPolicySections, PRIVACY_POLICY_LAST_UPDATED } from "./utils/privacyPolicy";
 
 const NOTIF_KEY = "@gym_tracker_notifications";
 
@@ -119,25 +121,58 @@ function AppearanceModal({ visible, onClose }: { visible: boolean; onClose: () =
 function UnitsModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const { colors } = useTheme();
   const { unit, saveUnit } = useUnits();
-  const options: { label: string; value: UnitSystem; icon: string }[] = [
+  const [distanceUnit, setDistanceUnit] = useState<"km" | "mi">("km");
+
+  useEffect(() => {
+    if (visible) {
+      AsyncStorage.getItem("@gym_tracker_distance_unit").then((val) => {
+        setDistanceUnit(val === "mi" ? "mi" : "km");
+      });
+    }
+  }, [visible]);
+
+  const saveDistanceUnit = async (u: "km" | "mi") => {
+    setDistanceUnit(u);
+    await AsyncStorage.setItem("@gym_tracker_distance_unit", u);
+  };
+
+  const weightOptions: { label: string; value: UnitSystem; icon: string }[] = [
     { label: "Pounds (lbs)", value: "lbs", icon: "🇺🇸" },
     { label: "Kilograms (kg)", value: "kg", icon: "🌍" },
   ];
+  const distanceOptions: { label: string; value: "km" | "mi"; icon: string }[] = [
+    { label: "Miles (mi)", value: "mi", icon: "🇺🇸" },
+    { label: "Kilometers (km)", value: "km", icon: "🌍" },
+  ];
+
   return (
     <ModalShell visible={visible} onClose={onClose} title="Units">
-      {options.map((opt) => (
+      <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textSecondary, marginBottom: 8, marginLeft: 4 }}>Weight</Text>
+      {weightOptions.map((opt) => (
         <Pressable
           key={opt.value}
           style={({ pressed }) => [{ flexDirection: "row", alignItems: "center", paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, marginBottom: 8, backgroundColor: unit === opt.value ? colors.primaryLight : "transparent", borderWidth: unit === opt.value ? 2 : 1, borderColor: unit === opt.value ? colors.primary : colors.border }, pressed && { opacity: 0.7 }]}
-          onPress={() => { saveUnit(opt.value); onClose(); }}
+          onPress={() => { saveUnit(opt.value); }}
         >
           <Text style={{ fontSize: 24, marginRight: 14 }}>{opt.icon}</Text>
           <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text, flex: 1 }}>{opt.label}</Text>
           {unit === opt.value && <Text style={{ fontSize: 18, color: colors.primary, fontWeight: "700" }}>✓</Text>}
         </Pressable>
       ))}
+      <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textSecondary, marginBottom: 8, marginTop: 12, marginLeft: 4 }}>Distance</Text>
+      {distanceOptions.map((opt) => (
+        <Pressable
+          key={opt.value}
+          style={({ pressed }) => [{ flexDirection: "row", alignItems: "center", paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, marginBottom: 8, backgroundColor: distanceUnit === opt.value ? colors.primaryLight : "transparent", borderWidth: distanceUnit === opt.value ? 2 : 1, borderColor: distanceUnit === opt.value ? colors.primary : colors.border }, pressed && { opacity: 0.7 }]}
+          onPress={() => { saveDistanceUnit(opt.value); }}
+        >
+          <Text style={{ fontSize: 24, marginRight: 14 }}>{opt.icon}</Text>
+          <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text, flex: 1 }}>{opt.label}</Text>
+          {distanceUnit === opt.value && <Text style={{ fontSize: 18, color: colors.primary, fontWeight: "700" }}>✓</Text>}
+        </Pressable>
+      ))}
       <Pressable style={{ marginTop: 4, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.surfaceSecondary, alignItems: "center" }} onPress={onClose}>
-        <Text style={{ fontSize: 16, fontWeight: "600", color: colors.textSecondary }}>Cancel</Text>
+        <Text style={{ fontSize: 16, fontWeight: "600", color: colors.textSecondary }}>Done</Text>
       </Pressable>
     </ModalShell>
   );
@@ -182,10 +217,16 @@ const AVATAR_LOCAL_KEY = "@gym_tracker_avatar_uri";
 
 function ProfileEditModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const { colors } = useTheme();
+  const { unit, toStorage, label: unitLabel } = useUnits();
   const [userId, setUserId] = useState<string | null>(null);
   const [username, setUsername] = useState("");
   const [bio, setBio] = useState("");
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [heightFeet, setHeightFeet] = useState(5);
+  const [heightInches, setHeightInches] = useState(6);
+  const [includeHeight, setIncludeHeight] = useState(false);
+  const [bodyWeightInput, setBodyWeightInput] = useState("");
+  const [gender, setGender] = useState<"male" | "female" | null>(null);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -199,16 +240,36 @@ function ProfileEditModal({ visible, onClose }: { visible: boolean; onClose: () 
       setUserId(uid);
       Promise.all([
         db.getUserProfile(uid),
-        // Load last-known local avatar URI as a quick display while we check profile
         AsyncStorage.getItem(AVATAR_LOCAL_KEY),
       ]).then(([{ data: profile }, localUri]) => {
         if (profile?.username) setUsername(profile.username);
         if (profile?.bio) setBio(profile.bio);
-        // Prefer remote avatar_url, fall back to cached local URI
         setAvatarUri(profile?.avatar_url ?? localUri ?? null);
+
+        if (profile?.height_inches != null) {
+          const { feet, inches } = inchesToFeetInches(profile.height_inches);
+          setHeightFeet(feet);
+          setHeightInches(inches);
+          setIncludeHeight(true);
+        } else {
+          setHeightFeet(5);
+          setHeightInches(6);
+          setIncludeHeight(false);
+        }
+
+        if (profile?.body_weight_lbs != null) {
+          const displayed = unit === "kg"
+            ? Math.round(profile.body_weight_lbs * 0.453592 * 10) / 10
+            : profile.body_weight_lbs;
+          setBodyWeightInput(String(displayed));
+        } else {
+          setBodyWeightInput("");
+        }
+
+        setGender(profile?.gender === "male" || profile?.gender === "female" ? profile.gender : null);
       });
     });
-  }, [visible]);
+  }, [visible, unit]);
 
   const handlePickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -250,9 +311,21 @@ function ProfileEditModal({ visible, onClose }: { visible: boolean; onClose: () 
       }
     }
 
-    const updates: { username: string; bio?: string | null; avatar_url?: string | null } = {
+    const updates: {
+      username: string;
+      bio?: string | null;
+      avatar_url?: string | null;
+      height_inches?: number | null;
+      body_weight_lbs?: number | null;
+      gender?: "male" | "female" | null;
+    } = {
       username: username.trim(),
       bio: bio.trim() || null,
+      height_inches: includeHeight ? feetInchesToInches(heightFeet, heightInches) : null,
+      body_weight_lbs: bodyWeightInput.trim()
+        ? toStorage(parseFloat(bodyWeightInput))
+        : null,
+      gender,
     };
     if (avatarUrl !== undefined) updates.avatar_url = avatarUrl;
 
@@ -268,10 +341,11 @@ function ProfileEditModal({ visible, onClose }: { visible: boolean; onClose: () 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={profileStyles.backdrop}>
-        <View style={[profileStyles.sheet, { backgroundColor: colors.surface }]}>
+        <View style={[profileStyles.sheet, { backgroundColor: colors.surface, maxHeight: "92%" }]}>
           <View style={[profileStyles.handle, { backgroundColor: colors.border }]} />
           <Text style={[profileStyles.title, { color: colors.text }]}>Edit Profile</Text>
 
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           {/* ── Avatar ── */}
           <View style={profileStyles.avatarRow}>
             <Pressable style={profileStyles.avatarWrap} onPress={handlePickImage}>
@@ -305,7 +379,7 @@ function ProfileEditModal({ visible, onClose }: { visible: boolean; onClose: () 
           />
 
           {/* ── Bio ── */}
-          <Text style={[profileStyles.fieldLabel, { color: colors.textSecondary }]}>Bio</Text>
+          <Text style={[profileStyles.fieldLabel, { color: colors.textSecondary }]}>Bio (optional)</Text>
           <TextInput
             style={[profileStyles.input, profileStyles.bioInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.inputBackground }]}
             value={bio}
@@ -316,6 +390,71 @@ function ProfileEditModal({ visible, onClose }: { visible: boolean; onClose: () 
             maxLength={160}
           />
           <Text style={[profileStyles.charCount, { color: colors.textTertiary }]}>{bio.length}/160</Text>
+
+          {/* ── Optional body metrics ── */}
+          <View style={[profileStyles.optionalSection, { borderColor: colors.border, backgroundColor: colors.surfaceSecondary }]}>
+            <Text style={[profileStyles.optionalTitle, { color: colors.text }]}>Optional details</Text>
+            <Text style={[profileStyles.optionalHint, { color: colors.textTertiary }]}>
+              Height, body weight, and gender are never required.
+            </Text>
+
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <Text style={{ fontSize: 14, fontWeight: "600", color: colors.textSecondary }}>Include height</Text>
+              <Switch
+                value={includeHeight}
+                onValueChange={setIncludeHeight}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor="#fff"
+              />
+            </View>
+            {includeHeight && (
+              <HeightPicker
+                feet={heightFeet}
+                inches={heightInches}
+                onFeetChange={setHeightFeet}
+                onInchesChange={setHeightInches}
+              />
+            )}
+
+            <Text style={[profileStyles.fieldLabel, { color: colors.textSecondary, marginTop: 12 }]}>Body weight (optional)</Text>
+            <TextInput
+              style={[profileStyles.input, { borderColor: colors.border, color: colors.text, backgroundColor: colors.inputBackground, marginBottom: 12 }]}
+              value={bodyWeightInput}
+              onChangeText={setBodyWeightInput}
+              placeholder={`Weight in ${unitLabel}`}
+              placeholderTextColor={colors.textTertiary}
+              keyboardType="decimal-pad"
+            />
+
+            <Text style={[profileStyles.fieldLabel, { color: colors.textSecondary }]}>Gender (optional)</Text>
+            <View style={{ flexDirection: "row", gap: 10, marginBottom: 4 }}>
+              {(["male", "female"] as const).map((g) => {
+                const selected = gender === g;
+                return (
+                  <Pressable
+                    key={g}
+                    onPress={() => setGender(selected ? null : g)}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 12,
+                      borderRadius: 10,
+                      alignItems: "center",
+                      borderWidth: 2,
+                      borderColor: selected ? colors.primary : colors.border,
+                      backgroundColor: selected ? colors.primaryLight : colors.inputBackground,
+                    }}
+                  >
+                    <Text style={{ fontSize: 15, fontWeight: "600", color: selected ? colors.primary : colors.textSecondary, textTransform: "capitalize" }}>
+                      {g}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={{ height: 8 }} />
+          </ScrollView>
 
           {/* ── Actions ── */}
           <View style={profileStyles.actions}>
@@ -350,6 +489,9 @@ const profileStyles = StyleSheet.create({
   input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: 16, marginBottom: 16 },
   bioInput: { height: 80, textAlignVertical: "top" },
   charCount: { fontSize: 11, textAlign: "right", marginTop: -12, marginBottom: 16 },
+  optionalSection: { borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 8 },
+  optionalTitle: { fontSize: 15, fontWeight: "700", marginBottom: 4 },
+  optionalHint: { fontSize: 12, marginBottom: 14, lineHeight: 18 },
   actions: { flexDirection: "row", gap: 12, marginTop: 4 },
   cancelBtn: { flex: 1, paddingVertical: 13, borderRadius: 12, alignItems: "center" },
   saveBtn: { flex: 2, paddingVertical: 13, borderRadius: 12, alignItems: "center" },
@@ -422,15 +564,16 @@ function ChangePasswordModal({ visible, onClose }: { visible: boolean; onClose: 
   );
 }
 
-function ContentModal({ visible, onClose, title, sections }: { visible: boolean; onClose: () => void; title: string; sections: { heading?: string; body: string }[] }) {
+function ContentModal({ visible, onClose, title, sections, footer }: { visible: boolean; onClose: () => void; title: string; sections: { heading?: string; body: string }[]; footer?: string }) {
   const { colors } = useTheme();
   return (
     <Modal visible={visible} transparent animationType="fade">
       <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
         <Pressable style={{ ...StyleSheet.absoluteFillObject }} onPress={onClose} />
-        <View style={{ backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, maxHeight: "80%", elevation: 8 }}>
+        <View style={{ backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, maxHeight: "85%", elevation: 8 }}>
           <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: "center", marginBottom: 20 }} />
-          <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text, marginBottom: 20 }}>{title}</Text>
+          <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text, marginBottom: 4 }}>{title}</Text>
+          {footer && <Text style={{ fontSize: 12, color: colors.textTertiary, marginBottom: 16 }}>{footer}</Text>}
           <ScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1 }}>
             {sections.map((s, i) => (
               <View key={i} style={{ marginBottom: 16 }}>
@@ -494,6 +637,7 @@ export default function SettingsScreen() {
   const [showGettingStarted, setShowGettingStarted] = useState(false);
   const [showRoutineHelp, setShowRoutineHelp] = useState(false);
   const [showFAQ, setShowFAQ] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
 
   useEffect(() => {
@@ -637,6 +781,7 @@ export default function SettingsScreen() {
         {/* Help */}
         <SettingSection title="Help">
           <SettingItem icon="help-circle-outline" label="Frequently Asked Questions" onPress={() => setShowFAQ(true)} />
+          <SettingItem icon="shield-checkmark-outline" label="Privacy Policy" onPress={() => setShowPrivacy(true)} />
           <SettingItem icon="mail-outline" label="Contact Us" onPress={handleContactUs} />
           <SettingItem icon="star-outline" label="Rate the App" onPress={handleRateApp} />
           <SettingItem icon="information-circle-outline" label="About" onPress={() => setShowAbout(true)} />
@@ -673,6 +818,13 @@ export default function SettingsScreen() {
       <ContentModal visible={showGettingStarted} onClose={() => setShowGettingStarted(false)} title="Getting Started" sections={gettingStartedSections} />
       <ContentModal visible={showRoutineHelp} onClose={() => setShowRoutineHelp(false)} title="Routine Help" sections={routineHelpSections} />
       <ContentModal visible={showFAQ} onClose={() => setShowFAQ(false)} title="FAQ" sections={faqSections} />
+      <ContentModal
+        visible={showPrivacy}
+        onClose={() => setShowPrivacy(false)}
+        title="Privacy Policy"
+        footer={`Last updated: ${PRIVACY_POLICY_LAST_UPDATED}`}
+        sections={privacyPolicySections}
+      />
       <AboutModal visible={showAbout} onClose={() => setShowAbout(false)} />
     </View>
   );

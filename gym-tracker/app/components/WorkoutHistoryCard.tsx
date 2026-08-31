@@ -5,6 +5,7 @@ import { useRouter } from "expo-router";
 import { db } from "../backend/db";
 import { useTheme } from "../theme/ThemeContext";
 import { useUnits } from "../utils/units";
+import { formatDistance, formatDurationShort } from "../utils/cardioUtils";
 
 type WorkoutHistoryCardProps = {
   session_id: number;
@@ -19,17 +20,30 @@ type WorkoutHistoryCardProps = {
   exerciseNames?: string[];
   onDelete?: (sessionId: number) => void;
   onEditWorkout?: (sessionId: number) => void;
+  totalCardioDistanceMeters?: number;
+  totalCardioDurationSeconds?: number;
+  distanceUnit?: 'km' | 'mi';
 };
 
-function fullDate(dateStr: string): string {
+function parseLocalDate(dateStr: string): Date {
+  const part = dateStr.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(part)) {
+    const [y, m, d] = part.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
   const d = new Date(dateStr);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function fullDate(dateStr: string): string {
+  const d = parseLocalDate(dateStr);
   return d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 }
 
 function relativeDate(dateStr: string): string {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const d = new Date(dateStr);
+  const d = parseLocalDate(dateStr);
   d.setHours(0, 0, 0, 0);
   const diff = Math.round((today.getTime() - d.getTime()) / 86400000);
   if (diff === 0) return "Today";
@@ -67,6 +81,9 @@ const WorkoutHistoryCard = memo(function WorkoutHistoryCard({
   exerciseNames = [],
   onDelete,
   onEditWorkout,
+  totalCardioDistanceMeters = 0,
+  totalCardioDurationSeconds = 0,
+  distanceUnit = 'km',
 }: WorkoutHistoryCardProps) {
   const { colors } = useTheme();
   const { toDisplay, label: unitLabel } = useUnits();
@@ -130,7 +147,7 @@ const WorkoutHistoryCard = memo(function WorkoutHistoryCard({
       <View style={styles.dateRow}>
         <View style={[styles.dateIcon, { backgroundColor: colors.surfaceSecondary }]}>
           <Text style={[styles.dateIconText, { color: colors.primary }]}>
-            {new Date(sessionDate).getDate()}
+            {parseLocalDate(sessionDate).getDate()}
           </Text>
         </View>
         <View style={{ flex: 1 }}>
@@ -160,10 +177,24 @@ const WorkoutHistoryCard = memo(function WorkoutHistoryCard({
           <Text style={[styles.statValue, { color: colors.textSecondary }]}>{exerciseCount}</Text>
           <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Exercises</Text>
         </View>
-        <View style={styles.statItem}>
-          <Text style={[styles.statValue, { color: colors.textSecondary }]}>{volumeDisplay} {unitLabel}</Text>
-          <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Volume</Text>
-        </View>
+        {totalVolume > 0 && (
+          <View style={styles.statItem}>
+            <Text style={[styles.statValue, { color: colors.textSecondary }]}>{volumeDisplay} {unitLabel}</Text>
+            <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Volume</Text>
+          </View>
+        )}
+        {totalCardioDistanceMeters > 0 && (
+          <View style={styles.statItem}>
+            <Text style={[styles.statValue, { color: colors.textSecondary }]}>{formatDistance(totalCardioDistanceMeters, distanceUnit)}</Text>
+            <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Distance</Text>
+          </View>
+        )}
+        {totalCardioDurationSeconds > 0 && totalCardioDistanceMeters === 0 && (
+          <View style={styles.statItem}>
+            <Text style={[styles.statValue, { color: colors.textSecondary }]}>{formatDurationShort(totalCardioDurationSeconds)}</Text>
+            <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Cardio</Text>
+          </View>
+        )}
       </View>
 
       {/* Exercise list */}

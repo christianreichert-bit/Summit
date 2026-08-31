@@ -20,19 +20,60 @@ const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 // useSupabase = Supabase configured AND network available (runtime check)
 const useSupabase = () => isOnline && networkStatus.isConnected;
 
+async function syncUserProfileFromAuth() {
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  if (error || !user) return;
+
+  const metaUsername =
+    typeof user.user_metadata?.username === "string"
+      ? user.user_metadata.username.trim()
+      : "";
+  const username = metaUsername || user.email?.split("@")[0] || "user";
+
+  await supabase.from("users").upsert(
+    {
+      user_id: user.id,
+      username,
+      email: user.email ?? "",
+      password_hash: "managed_by_supabase_auth",
+    },
+    { onConflict: "user_id" }
+  );
+}
+
 export const db = {
   // Auth
-  signUp: async (email: string, password: string, username: string) => {
+  signUp: async (
+    email: string,
+    password: string,
+    username: string,
+    emailRedirectTo?: string
+  ) => {
     if (useSupabase()) {
-      const { data, error: signUpError } = await supabase.auth.signUp({ email, password });
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { username },
+          emailRedirectTo,
+        },
+      });
       if (signUpError) return { data: null, error: signUpError };
-      if (data.user) {
-        const { error: insertError } = await supabase.from("users").insert({
-          user_id: data.user.id,
-          username,
-          email,
-          password_hash: "managed_by_supabase_auth",
-        });
+      // Profile row is created by DB trigger (see supabase/fix-signup.sql).
+      // Only upsert here when we already have a session (email confirmation off).
+      if (data.user && data.session) {
+        const { error: insertError } = await supabase.from("users").upsert(
+          {
+            user_id: data.user.id,
+            username,
+            email,
+            password_hash: "managed_by_supabase_auth",
+          },
+          { onConflict: "user_id" }
+        );
         if (insertError) return { data: null, error: insertError };
       }
       return { data, error: null };
@@ -43,9 +84,23 @@ export const db = {
   signIn: async (email: string, password: string) => {
     if (useSupabase()) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (!error) {
+        await syncUserProfileFromAuth();
+      }
       return { error };
     }
     return localDb.signIn(email, password);
+  },
+
+  resendConfirmationEmail: async (email: string, emailRedirectTo?: string) => {
+    if (useSupabase()) {
+      return supabase.auth.resend({
+        type: "signup",
+        email,
+        options: emailRedirectTo ? { emailRedirectTo } : undefined,
+      });
+    }
+    return { data: null, error: { message: "Requires internet connection." } };
   },
 
   requestPasswordReset: async (email: string, redirectTo?: string) => {

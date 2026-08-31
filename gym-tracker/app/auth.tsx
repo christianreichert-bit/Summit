@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { db } from "./backend/db";
+import { db, isOnline } from "./backend/db";
 import { useTheme } from "./theme/ThemeContext";
 
 export default function AuthScreen() {
@@ -34,11 +34,28 @@ export default function AuthScreen() {
     }
   };
 
+  const authRedirectUrl =
+    Platform.OS === "web" && typeof window !== "undefined"
+      ? `${window.location.origin}/auth`
+      : "gymtracker://auth";
+
   useEffect(() => {
     syncStoredUserId().catch((syncError) => {
       console.error("Failed to sync stored user id:", syncError);
     });
-  }, []);
+
+    const result = db.onAuthStateChange((event: string, session: any) => {
+      if (session && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED")) {
+        syncStoredUserId()
+          .then(() => router.replace("/(tabs)"))
+          .catch((syncError) => console.error("Failed to sync stored user id:", syncError));
+      }
+    });
+    const subscription = result?.data?.subscription;
+    return () => {
+      if (subscription?.unsubscribe) subscription.unsubscribe();
+    };
+  }, [router]);
 
   useEffect(() => {
     if (resetCooldown <= 0) return;
@@ -104,14 +121,53 @@ export default function AuthScreen() {
           return;
         }
       } else {
-        const { error: signUpError } = await db.signUp(email.trim(), password, username.trim());
+        const { data, error: signUpError } = await db.signUp(
+          email.trim(),
+          password,
+          username.trim(),
+          authRedirectUrl
+        );
         if (signUpError) {
           setError(signUpError.message ?? "Failed to create account.");
+          return;
+        }
+        if (isOnline && !data?.session) {
+          setInfo(
+            "Account created. Check your email, click the confirmation link, then sign in here."
+          );
+          setMode("signIn");
+          setPassword("");
           return;
         }
       }
       await syncStoredUserId();
       router.replace("/(tabs)");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    if (!email.trim()) {
+      setError("Enter your email first, then resend the confirmation link.");
+      setInfo(null);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setInfo(null);
+
+    try {
+      const { error: resendError } = await db.resendConfirmationEmail(
+        email.trim(),
+        authRedirectUrl
+      );
+      if (resendError) {
+        setError(resendError.message ?? "Failed to resend confirmation email.");
+        return;
+      }
+      setInfo("Confirmation email sent. Click the link in your inbox, then sign in.");
     } finally {
       setLoading(false);
     }
@@ -215,15 +271,26 @@ export default function AuthScreen() {
           {info && <Text style={[styles.info, { color: colors.success }]}>{info}</Text>}
 
           {mode === "signIn" && (
-            <Pressable
-              style={({ pressed }) => [styles.forgotPasswordButton, pressed && { opacity: 0.75 }]}
-              onPress={handleForgotPassword}
-              disabled={loading || resetCooldown > 0}
-            >
-              <Text style={[styles.forgotPasswordText, { color: colors.primary }]}>
-                {resetCooldown > 0 ? `Forgot password? (${resetCooldown}s)` : "Forgot password?"}
-              </Text>
-            </Pressable>
+            <>
+              <Pressable
+                style={({ pressed }) => [styles.forgotPasswordButton, pressed && { opacity: 0.75 }]}
+                onPress={handleForgotPassword}
+                disabled={loading || resetCooldown > 0}
+              >
+                <Text style={[styles.forgotPasswordText, { color: colors.primary }]}>
+                  {resetCooldown > 0 ? `Forgot password? (${resetCooldown}s)` : "Forgot password?"}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.forgotPasswordButton, pressed && { opacity: 0.75 }]}
+                onPress={handleResendConfirmation}
+                disabled={loading}
+              >
+                <Text style={[styles.forgotPasswordText, { color: colors.primary }]}>
+                  Resend confirmation email
+                </Text>
+              </Pressable>
+            </>
           )}
 
           <Pressable
